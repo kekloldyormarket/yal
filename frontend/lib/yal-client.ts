@@ -1,5 +1,6 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getTokenMetadata } from "@solana/spl-token";
+import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { fetchAllYalTokens, type YalToken, STACSOL, YAL_PROGRAM_ID, TOKEN_2022_PROGRAM } from "./sdk";
 import type { UiToken } from "./types";
 
@@ -28,21 +29,36 @@ export async function fetchNav(conn: Connection): Promise<number> {
   return Number(totalLamports) / Number(poolTokenSupply);
 }
 
+interface PoolView {
+  bondedSol: number;
+  thresholdSol: number;
+  isMigrated: boolean;
+}
+
 /** Convert on-chain YalToken bigint fields to plain numbers + derive status/progress. */
-export function toUiToken(t: YalToken, meta?: { name?: string; ticker?: string; desc?: string; img?: string }): UiToken {
+export function toUiToken(
+  t: YalToken,
+  meta?: { name?: string; ticker?: string; desc?: string; img?: string },
+  pool?: PoolView,
+): UiToken {
   const totalSupply = Number(t.totalSupply);
   const circulatingSupply = Number(t.circulatingSupply);
   const treasuryStacsol = Number(t.treasuryStacsol) / 1e9;
   const treasurySolLamports = Number(t.treasurySolLamports);
+  // Prefer the live Meteora pool's quoteReserve over YAL's stored value —
+  // YAL only fills bonded_sol_lamports at graduation, but the curve is
+  // already accumulating SOL on the Meteora side.
   const bondedSolLamports = Number(t.bondedSolLamports);
-  const bondedSol = bondedSolLamports / 1e9;
+  const bondedSol = pool?.bondedSol ?? bondedSolLamports / 1e9;
+  const thresholdSol = pool?.thresholdSol ?? GRADUATION_THRESHOLD_SOL;
   const graduatedAt = Number(t.graduatedAt);
   const lastLiquidationTs = Number(t.lastLiquidationTs);
 
-  const status: "bonding" | "graduated" = graduatedAt > 0 ? "graduated" : "bonding";
+  const status: "bonding" | "graduated" =
+    graduatedAt > 0 || pool?.isMigrated ? "graduated" : "bonding";
   const progress = status === "graduated"
     ? 1
-    : Math.min(1, bondedSol / GRADUATION_THRESHOLD_SOL);
+    : Math.min(1, bondedSol / thresholdSol);
 
   // Without an indexer we have no creation timestamp; use last_liquidation_ts as fallback
   // for graduated tokens, or 0 (unknown) for bonding.
@@ -113,16 +129,39 @@ export function invalidateMintMeta(mint: string): void {
   META_CACHE.delete(mint);
 }
 
+async function fetchPoolView(
+  dbc: DynamicBondingCurveClient,
+  mint: PublicKey,
+): Promise<PoolView | undefined> {
+  try {
+    const poolState = await dbc.state.getPoolByBaseMint(mint);
+    if (!poolState) return undefined;
+    const cfg = await dbc.state.getPoolConfig(poolState.account.config);
+    if (!cfg) return undefined;
+    return {
+      bondedSol: Number(poolState.account.quoteReserve.toString()) / 1e9,
+      thresholdSol: Number(cfg.migrationQuoteThreshold.toString()) / 1e9,
+      isMigrated: poolState.account.isMigrated === 1,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 /** Fetch all YAL tokens from mainnet and convert to UI shape — enriches each
- *  token with its Token-2022 metadata + the JSON description/image so the
- *  listing survives across redeploys. */
+ *  token with its Token-2022 metadata + the JSON description/image + live
+ *  Meteora pool state (bonded sol, threshold, migration flag). */
 export async function listTokens(conn: Connection): Promise<UiToken[]> {
   const onchain = await fetchAllYalTokens(conn);
-  // Parallel enrich — single getTokenMetadata + at most one fetch() per mint.
+  const dbc = new DynamicBondingCurveClient(conn, "confirmed");
+  // Parallel: metadata + pool view per token.
   const enriched = await Promise.all(
     onchain.map(async (t) => {
-      const meta = await fetchMintMeta(conn, t.memeMint);
-      return toUiToken(t, meta);
+      const [meta, pool] = await Promise.all([
+        fetchMintMeta(conn, t.memeMint),
+        fetchPoolView(dbc, t.memeMint),
+      ]);
+      return toUiToken(t, meta, pool);
     }),
   );
   return enriched;
