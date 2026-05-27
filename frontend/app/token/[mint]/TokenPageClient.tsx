@@ -14,6 +14,7 @@ import { TOKEN_2022_PROGRAM } from "@/lib/sdk";
 import { buildSwapTx } from "@/lib/swap-tx";
 import { appendTip, sendViaSender } from "@/lib/sender";
 import { useDbcPoolState } from "@/lib/dbc-state";
+import { useCreatedAt } from "@/lib/created-at";
 import { buildMetadataUpdateTx } from "@/lib/metadata-update-tx";
 import { useYal } from "../../providers";
 import type { UiToken } from "@/lib/types";
@@ -235,6 +236,8 @@ function TokenTop({ token }: { token: UiToken }) {
 function BondingChartPanel({ token }: { token: UiToken }) {
   const { connection } = useYal();
   const { state: dbc } = useDbcPoolState(connection, token.mint);
+  const createdAt = useCreatedAt(connection, token.pubkey);
+  const ageTs = createdAt ?? (token.created_at || null);
 
   // Live values pulled straight from the Meteora pool. Fall back to the YAL
   // token's stored bonded only when the DBC reader is still warming up.
@@ -303,8 +306,8 @@ function BondingChartPanel({ token }: { token: UiToken }) {
           />
           <Stat
             k="age"
-            v={token.created_at ? fmt.agoTs(token.created_at) : "—"}
-            sub={token.created_at ? "since launch" : "indexer pending"}
+            v={ageTs ? fmt.agoTs(ageTs) : "—"}
+            sub={ageTs ? "since launch" : "fetching…"}
           />
         </div>
 
@@ -358,7 +361,7 @@ function BondingChartPanel({ token }: { token: UiToken }) {
               GRADUATE @ {thresholdSol.toFixed(0)} SOL
             </text>
             <text className="chart-axis" x={padL} y={H - 10}>
-              {token.created_at ? fmt.agoTs(token.created_at) + " ago" : "—"}
+              {ageTs ? fmt.agoTs(ageTs) + " ago" : "—"}
             </text>
             <text
               className="chart-axis"
