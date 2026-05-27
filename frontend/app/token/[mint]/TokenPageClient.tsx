@@ -822,8 +822,8 @@ function RedeemPanel({
             <div className="kv">
               <span className="k">share of supply</span>
               <span className="v num">
-                {token.circulating_supply > 0
-                  ? fmt.pct(parsedAmt / token.circulating_supply, 4)
+                {circulatingUi > 0
+                  ? fmt.pct(parsedAmt / circulatingUi, 4)
                   : "—"}
               </span>
             </div>
