@@ -15,18 +15,24 @@ turning every meme into a stake-yielding bag.
 5. $MEME holders redeem: burn meme tokens, receive
    (their_meme / circulating_meme) × treasury_stacSOL
 6. Memecoin can still be freely traded (speculation layer); redemption is optional
-7. The 6.9% mint fee on every stacSOL deposit retains 3.45% as protocol revenue
-8. Validator commission stays 100% → all inflation accrued by stacSOL NAV growth
+7. The 6.9% mint/burn/transfer fee on stacSOL itself flows back to NAV →
+   every interaction with the token grows the per-share floor
+8. Validator commission is 100% → all staking yield goes to the operator
+   directly (NOT to NAV — operator income, separate stream)
 ```
 
 ## Why this composes
 
-- **stacSOL is the universal sink**. Every meme launch grows stacSOL backing.
+- **stacSOL is the universal sink**. Every meme launch mints stacSOL.
   No new pools, no new validators, no new infrastructure per launch.
-- **The 6.9% mint/burn/transfer flywheel compounds with launch volume**.
-  Each graduation = a fresh deposit_sol = 3.45% to protocol retained.
-- **The validator earns inflation on the aggregated stake** (100% commission)
-  → all value flows back into stacSOL NAV.
+- **The 6.9% flywheel compounds with launchpad volume**.
+  Each graduation = a fresh `deposit_sol` mint = 6.9% of bonded SOL → NAV.
+  Each redemption = a burn = another 6.9% to NAV. Speculative transfers
+  while users hold stacSOL also pay 6.9% to NAV. Pure usage growth.
+- **Validator commission is the operator's income line**, not NAV's. The
+  validator pays for the infrastructure that makes stacSOL credible (one
+  node, patched agave, native vote batching); the NAV-growth engine is
+  the Token-2022 fee, which is independent.
 - **Memecoin is just a distribution layer**. The bonding curve is the user-facing
   speculation venue; the redemption is the productive yield path.
 

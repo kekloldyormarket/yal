@@ -54,12 +54,13 @@ export default function HomePage() {
           Same DBC curve as pump.fun. Pick your graduation tier — <strong>5,
           20, or 80 SOL bonded</strong>. Once it hits, a 24-hour countdown
           starts. Within that window, at one random moment, the entire
-          bonded SOL flips into <strong>stacSOL</strong> — our
-          100%-commission single-validator LST on patched agave. The AMM
-          dies. The meme dies. <strong>Everyone who held when the music
-          stopped walks away with a pro-rata stacSOL claim</strong>, burnable
-          forever. NAV compounds on autopilot from validator yield → your
-          slice only ratchets up. The marketing is the math.
+          bonded SOL gets minted into <strong>stacSOL</strong> — our
+          Token-2022 LST with a <strong>6.9% fee on every mint, burn, and
+          transfer, all flowing back to NAV</strong>. The AMM dies. The meme
+          dies. <strong>Everyone who held when the music stopped walks away
+          with a pro-rata stacSOL claim</strong>, burnable forever. Every
+          mint funds NAV. Every redemption funds NAV. NAV only goes up →
+          your slice only goes up. The marketing is the math.
         </p>
       </div>
 

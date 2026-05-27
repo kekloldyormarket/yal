@@ -538,11 +538,11 @@ function Flywheel() {
         <div className="panel-body">
           <FlyStep n="01" t="someone launches" d="anyone. no permission. 0.02 sol." />
           <FlyStep n="02" t="bonding fills" d="meteora DBC. price discovers itself." />
-          <FlyStep n="03" t="80 sol reached" d="curve graduates. liquidity stops being LP." />
+          <FlyStep n="03" t="threshold hits" d="5 / 20 / 80 sol. curve graduates. 24h countdown." />
           <FlyStep
             n="04"
-            t="bonded sol → stacSOL"
-            d="staked. 100% commission. NAV grows forever."
+            t="music stops"
+            d="bonded SOL minted into stacSOL. 6.9% fee → NAV."
             accent
           />
           <FlyStep
@@ -552,8 +552,8 @@ function Flywheel() {
           />
           <FlyStep
             n="06"
-            t="floor only rises"
-            d="every redemption shrinks supply faster than treasury."
+            t="every redemption funds NAV too"
+            d="6.9% burn fee → NAV. floor up for everyone left."
             accent
           />
         </div>

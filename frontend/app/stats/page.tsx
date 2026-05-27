@@ -82,8 +82,12 @@ export default function StatsPage() {
               </span>
             </div>
             <div className="kv">
-              <span className="k">commission</span>
-              <span className="v accent">100%</span>
+              <span className="k">mint/burn/xfer fee → NAV</span>
+              <span className="v accent">6.9%</span>
+            </div>
+            <div className="kv">
+              <span className="k">validator commission → operator</span>
+              <span className="v">100%</span>
             </div>
             <div className="kv">
               <span className="k">token program</span>
@@ -173,8 +177,8 @@ export default function StatsPage() {
           proof-of-concept. YAL is the distribution layer.
         </p>
         <p>
-          <span className="num">05.</span> 100% commission. all inflation
-          accrues to NAV.
+          <span className="num">05.</span> 6.9% mint/burn/xfer fee on stacSOL,
+          all to NAV. validator commission goes to the operator.
         </p>
         <p>
           <span className="num">06.</span> burn your meme. claim your share.

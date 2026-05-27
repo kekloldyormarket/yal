@@ -5,13 +5,15 @@ stake-yielding bag forever.
 
 ```
 memecoin  =  speculation / distribution layer
-stacSOL   =  backing layer (100% commission, protocol absorbs all yield)
+stacSOL   =  backing layer (Token-2022 LST, 6.9% mint/burn/xfer fee → NAV;
+             validator commission goes to the operator separately)
 24hr liq  =  pre + post bond reserves → stacSOL deposit
 payout    =  burn meme tokens → receive (your_meme / circulating_meme)
              × treasury_stacsol
-flywheel  =  backing only ever grows; supply only ever leaves via redemption
-             stacSOL itself charges 6.9% on every mint, 50% retained by
-             protocol — so YAL deposits compound stacSOL revenue too
+flywheel  =  every meme launch mints stacSOL (6.9% to NAV at mint).
+             every redemption burns stacSOL (6.9% to NAV on burn).
+             every speculative transfer pays 6.9% to NAV.
+             NAV only goes up → every meme's floor only goes up.
 ```
 
 ## Architecture
@@ -65,6 +67,6 @@ stacSOL constants are hardcoded in `programs/yal/src/lib.rs`:
 - Pool: `E6oqvrLKexQwFJyCnQ8ewx8xt9tQo7uezat24f5Qixqb`
 - Mint: `6K4xdfEk5rvySM496rxm4x8AgC9wVt7N4C7mFFpNAj5f`
 
-100% commission validator: `35GSjBdKG49hTh5xA9HViwQNEmZMzDigNvBpKJXjKKAv`
+Single validator (100% commission, operator income): `35GSjBdKG49hTh5xA9HViwQNEmZMzDigNvBpKJXjKKAv`
 Patched agave with native TowerSync batching:
 https://github.com/kekloldyormarket/agave (branch `feat/vote-batching`)

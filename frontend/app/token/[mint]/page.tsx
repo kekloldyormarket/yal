@@ -897,17 +897,19 @@ function AboutPanel() {
           style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.7 }}
         >
           <p style={{ marginBottom: 10 }}>
-            stacSOL is a single-validator LST running a patched{" "}
-            <span className="accent">agave</span> with native TowerSync
-            multi-slot vote batching.
+            stacSOL is a Token-2022 LST backed by a single validator running
+            a patched <span className="accent">agave</span> with native
+            TowerSync multi-slot vote batching.
           </p>
           <p style={{ marginBottom: 10 }}>
-            100% commission. all inflation income accrues to NAV. the validator
-            was the proof-of-concept; YAL is the distribution layer.
+            <strong>6.9% fee on every mint, burn, and transfer</strong> of
+            stacSOL — all of it flows back to NAV. Every interaction with the
+            token pumps the floor for everyone still holding. Validator
+            commission is collected by the operator separately, not by NAV.
           </p>
           <p style={{ marginBottom: 10 }}>
-            anyone can launch a meme; every graduation grows stacSOL backing
-            forever.
+            anyone can launch a meme; every graduation mints stacSOL (and
+            funds NAV via the 6.9% mint fee in the process).
           </p>
           <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
             <a
