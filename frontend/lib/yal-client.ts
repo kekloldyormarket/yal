@@ -59,8 +59,17 @@ export function toUiToken(
   const graduatedAt = Number(t.graduatedAt);
   const lastLiquidationTs = Number(t.lastLiquidationTs);
 
+  // Status detection: prefer YAL's stored graduated_at, fall back to the
+  // Meteora pool's isMigrated flag, and as a last resort flag any token
+  // whose circulating < total (redemptions have happened — definitionally
+  // post-curve, even if graduated_at was never written via the YAL ix and
+  // the pool view fetch hiccuped on this refresh).
   const status: "bonding" | "graduated" =
-    graduatedAt > 0 || pool?.isMigrated ? "graduated" : "bonding";
+    graduatedAt > 0 ||
+    pool?.isMigrated ||
+    circulatingSupply < totalSupply
+      ? "graduated"
+      : "bonding";
   const progress = status === "graduated"
     ? 1
     : Math.min(1, bondedSol / thresholdSol);

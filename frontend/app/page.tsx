@@ -107,19 +107,16 @@ export default function HomePage() {
           long live <span className="accent">stacSOL.</span>
         </h1>
         <p className="sub">
-          <strong>Launch a throwaway meme.</strong> Same DBC curve as
-          pump.fun, three tiers — <strong>5, 20, or 80 SOL</strong> to bond.
-          Pick the one you&apos;re comfy with. Once it hits, a 24-hour
-          countdown starts; at one random moment inside that window{" "}
+          <strong>The only launchpad where memes graduate into an LST.</strong>{" "}
+          Bond your meme to <strong>5, 20, or 80 SOL</strong>. When it hits,
+          a 24-hour countdown starts; at one random moment inside that window{" "}
           <strong>the AMM gets pulled, the meme dies, and every holder&apos;s
-          bag becomes a pro-rata claim on stacSOL</strong> — our Token-2022
-          LST that compounds NAV via a 6.9% fee on every mint, burn, and
-          transfer. After the music stops the only exit is burn → claim. No
-          more buying. No more selling. <strong>If you want long-term AMM
-          holds, you&apos;re in the wrong place.</strong> Bond too low and
-          you&apos;ll never get to play with the curve. Bond too high and you
-          might never graduate. Pick your tier. Pick your fate. The marketing
-          is the math.
+          bag becomes a pro-rata claim on stacSOL</strong>. After the music
+          stops the only exit is burn → claim. No more buying. No more
+          selling. <strong>If you want long-term AMM holds, you&apos;re in
+          the wrong place.</strong> Bond too low and you&apos;ll never get to
+          play with the curve. Bond too high and you might never graduate.
+          Pick your tier. Pick your fate. The marketing is the math.
         </p>
         <p className="sub" style={{ marginTop: 14, fontSize: 13 }}>
           if you&apos;re tired of gambling then{" "}

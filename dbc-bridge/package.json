@@ -8,6 +8,7 @@
     "once": "bun run src/index.ts --once"
   },
   "dependencies": {
+    "@meteora-ag/cp-amm-sdk": "^1.4.3",
     "@meteora-ag/dynamic-bonding-curve-sdk": "^1.5.3",
     "@solana/web3.js": "^1.98.0"
   },

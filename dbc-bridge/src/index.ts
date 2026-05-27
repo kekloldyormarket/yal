@@ -27,7 +27,11 @@ import {
   DynamicBondingCurveClient,
   DAMM_V2_MIGRATION_FEE_ADDRESS,
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
+import BN from "bn.js";
 import * as fs from "node:fs";
+
+const U64_MAX = new BN("18446744073709551615");
+const CLAIM_DUST_LAMPORTS = 10_000; // ignore claims worth <0.00001 SOL — tx fee dominates
 
 const RPC = process.env.RPC_URL ||
   "https://rpc.ironforge.network/mainnet?apiKey=01KSG5964GKG2V5B0CZDX3X3WY";
@@ -38,6 +42,11 @@ const YAL_PROGRAM = new PublicKey(
 );
 
 const SLEEP_MS = 30_000;
+// Run DBC fee claims every N cycles, not every cycle — most ticks find dust
+// and burn tx fees for nothing. 30 cycles × 30s = 15min between sweeps,
+// keeps the migration-detection cadence tight while the partner/creator
+// revenue collection runs at a sane pace.
+const CLAIM_EVERY_N_CYCLES = 30;
 const ARGV_ONCE = process.argv.includes("--once");
 
 function loadKey(path: string): Keypair {
@@ -70,13 +79,117 @@ async function fetchAllYalTokens(conn: Connection): Promise<YalToken[]> {
   });
 }
 
+/** Pull accrued DBC trading fees on a single pool back to the YAL payer.
+ *  Partner fees are always claimable (feeClaimer = deployer per config).
+ *  Creator fees only when the pool's creator pubkey matches the payer
+ *  (legacy/house launches; user launches have creator = user, can't claim
+ *  without their sig). SOL receiver = payer wallet — converted to stacSOL
+ *  + deposited per-meme by the liquidator step downstream. */
+async function claimDbcFees(
+  conn: Connection,
+  dbc: DynamicBondingCurveClient,
+  payer: Keypair,
+  poolPubkey: PublicKey,
+  poolState: any,
+  ts: string,
+  mintShort: string,
+) {
+  let breakdown;
+  try {
+    breakdown = await dbc.state.getPoolFeeBreakdown(poolPubkey);
+  } catch (e: any) {
+    console.warn(`[${ts}]   ${mintShort} feeBreakdown failed: ${e.message?.slice(0, 120)}`);
+    return;
+  }
+
+  // Partner side — always YAL.
+  if (breakdown.partner.unclaimedQuoteFee.gt(new BN(CLAIM_DUST_LAMPORTS))) {
+    const sol = Number(breakdown.partner.unclaimedQuoteFee.toString()) / 1e9;
+    try {
+      const tx = await dbc.partner.claimPartnerTradingFee({
+        feeClaimer: payer.publicKey,
+        payer: payer.publicKey,
+        pool: poolPubkey,
+        maxBaseAmount: U64_MAX,
+        maxQuoteAmount: U64_MAX,
+        receiver: payer.publicKey,
+      });
+      const sig = await sendAndConfirmTransaction(conn, tx, [payer], {
+        commitment: "confirmed",
+        maxRetries: 5,
+      });
+      console.log(`[${ts}]   ${mintShort} PARTNER claim ${sol.toFixed(5)} SOL · ${sig.slice(0, 12)}…`);
+    } catch (err: any) {
+      console.warn(`[${ts}]   ${mintShort} partner claim failed: ${err.message?.slice(0, 200)}`);
+    }
+  }
+
+  // Creator side — only when YAL owns the creator key. Otherwise we'd need
+  // the user's signature; skip silently.
+  const creatorKey: PublicKey | undefined = poolState?.account?.creator;
+  if (
+    creatorKey &&
+    creatorKey.equals(payer.publicKey) &&
+    breakdown.creator.unclaimedQuoteFee.gt(new BN(CLAIM_DUST_LAMPORTS))
+  ) {
+    const sol = Number(breakdown.creator.unclaimedQuoteFee.toString()) / 1e9;
+    try {
+      const tx = await dbc.creator.claimCreatorTradingFee({
+        creator: payer.publicKey,
+        payer: payer.publicKey,
+        pool: poolPubkey,
+        maxBaseAmount: U64_MAX,
+        maxQuoteAmount: U64_MAX,
+        receiver: payer.publicKey,
+      });
+      const sig = await sendAndConfirmTransaction(conn, tx, [payer], {
+        commitment: "confirmed",
+        maxRetries: 5,
+      });
+      console.log(`[${ts}]   ${mintShort} CREATOR claim ${sol.toFixed(5)} SOL · ${sig.slice(0, 12)}…`);
+    } catch (err: any) {
+      console.warn(`[${ts}]   ${mintShort} creator claim failed: ${err.message?.slice(0, 200)}`);
+    }
+  }
+}
+
+let cycleCount = 0;
+
 async function cycle(conn: Connection, dbc: DynamicBondingCurveClient, payer: Keypair) {
   const ts = new Date().toISOString().slice(11, 19);
   const tokens = await fetchAllYalTokens(conn);
   const pending = tokens.filter((t) => t.graduatedAt === 0n);
+  const doClaimSweep = cycleCount % CLAIM_EVERY_N_CYCLES === 0;
   console.log(
-    `[${ts}] tracking ${tokens.length} YAL tokens · ${pending.length} pre-migration`,
+    `[${ts}] tracking ${tokens.length} YAL tokens · ${pending.length} pre-migration${
+      doClaimSweep ? " · claim-sweep" : ""
+    }`,
   );
+
+  // Claim accrued DBC trading fees across every YAL token. Runs every
+  // CLAIM_EVERY_N_CYCLES ticks — most ticks would find dust and waste tx
+  // fees. Pre-migration: fees keep accruing. Post-migration: there may
+  // still be unclaimed residuals from the last bonding phase.
+  if (doClaimSweep) {
+    for (const t of tokens) {
+      try {
+        const poolState = await dbc.state.getPoolByBaseMint(t.memeMint);
+        if (!poolState) continue;
+        await claimDbcFees(
+          conn,
+          dbc,
+          payer,
+          poolState.publicKey,
+          poolState,
+          ts,
+          t.memeMint.toBase58().slice(0, 8) + "…",
+        );
+      } catch (e: any) {
+        console.warn(`[${ts}] fee claim sweep failed for ${t.memeMint.toBase58()}: ${e.message?.slice(0, 120)}`);
+      }
+    }
+  }
+  cycleCount++;
 
   for (const t of pending) {
     let poolState;
