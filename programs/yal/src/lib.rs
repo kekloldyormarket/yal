@@ -197,10 +197,19 @@ pub mod yal {
             YalError::InsufficientMeme
         );
         require!(token.circulating_supply > 0, YalError::NothingCirculating);
-        require!(token.treasury_stacsol > 0, YalError::EmptyTreasury);
+
+        // Read the actual stacSOL backing from the treasury ATA, not the
+        // stored `token.treasury_stacsol` field. The stored field can only
+        // be updated by `deposit_to_stacsol` which CPIs Sanctum's
+        // `deposit_sol` — that path is currently broken for our PDA design
+        // (SystemProgram::Transfer rejects data-bearing `from`). External
+        // depositors can mint stacSOL directly into the treasury ATA via
+        // Sanctum, and redeem honors that backing as the source of truth.
+        let treasury_backing = ctx.accounts.treasury_stacsol_ata.amount;
+        require!(treasury_backing > 0, YalError::EmptyTreasury);
 
         let numerator = (meme_amount as u128)
-            .checked_mul(token.treasury_stacsol as u128)
+            .checked_mul(treasury_backing as u128)
             .ok_or(YalError::AccountingDelta)?;
         let payout = (numerator / token.circulating_supply as u128) as u64;
         require!(payout > 0, YalError::PayoutTooSmall);
@@ -241,10 +250,9 @@ pub mod yal {
             .circulating_supply
             .checked_sub(meme_amount)
             .ok_or(YalError::AccountingDelta)?;
-        token.treasury_stacsol = token
-            .treasury_stacsol
-            .checked_sub(payout)
-            .ok_or(YalError::AccountingDelta)?;
+        // Keep the stored treasury_stacsol roughly in sync for display, but
+        // saturate-subtract — the real source of truth is the ATA balance.
+        token.treasury_stacsol = token.treasury_stacsol.saturating_sub(payout);
 
         msg!(
             "yal: burned {} meme, paid {} stacSOL (circulating now {}, treasury {})",
