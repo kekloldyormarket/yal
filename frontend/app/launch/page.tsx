@@ -281,6 +281,7 @@ export default function LaunchPage() {
               errors={errors}
               next={next}
               wallet={wallet}
+              uploading={uploading}
             />
           )}
           {step === 2 && <SigningStep />}
@@ -304,6 +305,7 @@ function FormStep({
   errors,
   next,
   wallet,
+  uploading,
 }: {
   form: LaunchForm;
   setField: <K extends keyof LaunchForm>(k: K, v: LaunchForm[K]) => void;
@@ -312,6 +314,7 @@ function FormStep({
   errors: Partial<Record<keyof LaunchForm, string>>;
   next: () => void;
   wallet: unknown;
+  uploading: boolean;
 }) {
   return (
     <div className="panel">
