@@ -77,6 +77,10 @@ export interface LaunchInput {
   metadataUri: string;
   tier: GraduationTier;
   user: PublicKey;
+  /** Optional pre-generated base mint keypair. Lets the caller derive the
+   *  token's URL/PDA before metadata upload so external_url can point at
+   *  yal.fun/token/<mint>. If omitted, buildLaunchTx generates one. */
+  baseMint?: Keypair;
 }
 
 export interface BuiltLaunchTx {
@@ -99,7 +103,7 @@ export async function buildLaunchTx(
 ): Promise<BuiltLaunchTx> {
   const dbcConfig = YAL_DBC_CONFIGS[input.tier];
 
-  const baseMint = Keypair.generate();
+  const baseMint = input.baseMint ?? Keypair.generate();
   const treasuryAta = Keypair.generate();
   const [yalToken] = yalTokenPda(baseMint.publicKey);
 

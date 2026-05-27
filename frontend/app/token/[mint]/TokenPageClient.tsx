@@ -15,7 +15,9 @@ import { buildSwapTx } from "@/lib/swap-tx";
 import { appendTip, sendViaSender } from "@/lib/sender";
 import { useDbcPoolState } from "@/lib/dbc-state";
 import { useCreatedAt } from "@/lib/created-at";
+import { useTreasuryStacsol } from "@/lib/treasury-balance";
 import { buildMetadataUpdateTx } from "@/lib/metadata-update-tx";
+import { buildRedeemTx } from "@/lib/redeem-tx";
 import { useYal } from "../../providers";
 import type { UiToken } from "@/lib/types";
 
@@ -26,6 +28,7 @@ export default function TokenPageClient({
 }) {
   const { mint } = use(params);
   const { tokens, tokenLoading, wallet, nav, pushToast, applyLocalRedeem, connection } = useYal();
+  const { publicKey, signTransaction } = useWallet();
   // First check the loaded list (fast path for tokens we've already seen).
   // Fall back to a direct PDA fetch for tokens not yet in the list — handles
   // freshly-launched mints + deep links from outside the home page.
@@ -142,14 +145,48 @@ export default function TokenPageClient({
               token={token}
               wallet={wallet}
               nav={nav}
-              onRedeem={(amt) => {
-                const r = applyLocalRedeem(token.mint, amt);
-                if (r)
+              onRedeem={async (amt) => {
+                if (!publicKey || !signTransaction) {
+                  pushToast({ title: "connect a wallet first", kind: "danger" });
+                  return null;
+                }
+                try {
+                  // Tokens use 6 decimals — UI count → raw.
+                  const memeAmount = BigInt(Math.floor(amt * 1_000_000));
+                  const tx = await buildRedeemTx({
+                    conn: connection,
+                    user: publicKey,
+                    memeMint: new PublicKey(token.mint),
+                    treasuryAta: new PublicKey(token.treasury_ata),
+                    memeAmount,
+                  });
+                  appendTip(tx, publicKey);
+                  const signed = await signTransaction(tx);
+                  const sig = await sendViaSender(signed.serialize());
+                  const conf = await connection.confirmTransaction(sig, "confirmed");
+                  if (conf.value.err) {
+                    throw new Error(
+                      `redeem errored: ${JSON.stringify(conf.value.err)} (sig ${sig})`,
+                    );
+                  }
+                  // Optimistic local mirror so the UI shows the result. Real
+                  // numbers will refresh on the next listTokens tick.
+                  const r = applyLocalRedeem(token.mint, amt);
                   pushToast({
                     title: "redeemed " + fmt.num(amt) + " $" + token.ticker,
-                    sub: r.stacsol_received.toFixed(4) + " stacSOL received",
+                    sub: sig.slice(0, 8) + "…",
                   });
-                return r;
+                  return r;
+                } catch (err: unknown) {
+                  const msg = err instanceof Error ? err.message : "redeem failed";
+                  console.error("redeem failed:", err);
+                  pushToast({
+                    title: "redeem failed",
+                    sub: msg.slice(0, 280),
+                    kind: "danger",
+                  });
+                  return null;
+                }
               }}
             />
           ) : (
@@ -672,8 +709,13 @@ function RedeemPanel({
   token: UiToken;
   wallet: { holdings: Record<string, number> } | null;
   nav: number;
-  onRedeem: (amt: number) => { stacsol_received: number; sol_received: number } | null;
+  onRedeem: (amt: number) => Promise<{ stacsol_received: number; sol_received: number } | null> | { stacsol_received: number; sol_received: number } | null;
 }) {
+  const { connection } = useYal();
+  // Live treasury ATA balance — the on-chain truth. The stored token field
+  // can lag if SOL was deposited via direct Sanctum CPI.
+  const liveTreasuryStacsol = useTreasuryStacsol(connection, token.treasury_ata);
+  const effectiveTreasury = Math.max(liveTreasuryStacsol, token.treasury_stacsol);
   const [amt, setAmt] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [working, setWorking] = useState(false);
@@ -683,7 +725,7 @@ function RedeemPanel({
   const parsedAmt = parseFloat(amt) || 0;
   const stacsol_received =
     token.circulating_supply > 0
-      ? (parsedAmt / token.circulating_supply) * token.treasury_stacsol
+      ? (parsedAmt / token.circulating_supply) * effectiveTreasury
       : 0;
   const sol_received = stacsol_received * nav;
   const effective_floor = parsedAmt > 0 ? sol_received / parsedAmt : 0;
@@ -697,13 +739,14 @@ function RedeemPanel({
     setConfirming(true);
   }
 
-  function confirm() {
+  async function confirm() {
     setWorking(true);
-    setTimeout(() => {
-      const r = onRedeem(parsedAmt);
+    try {
+      const r = await onRedeem(parsedAmt);
       setResult(r);
+    } finally {
       setWorking(false);
-    }, 1100);
+    }
   }
 
   function reset() {

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Keypair } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useYal } from "../providers";
 import type { UiToken } from "@/lib/types";
@@ -104,6 +105,11 @@ export default function LaunchPage() {
     }
     setStep(2);
 
+    // Pre-generate the base mint so we can bake `yal.fun/token/<mint>` into
+    // the metadata's external_url before upload.
+    const baseMint = Keypair.generate();
+    const tokenUrl = `${YAL_EXTERNAL_URL}/token/${baseMint.publicKey.toBase58()}`;
+
     // 1. Upload Metaplex metadata JSON → public URL (goes on the mint).
     let metadataUri = "";
     try {
@@ -115,7 +121,7 @@ export default function LaunchPage() {
           symbol: form.ticker.toUpperCase(),
           description: form.description,
           image: form.img || "",
-          external_url: YAL_EXTERNAL_URL,
+          external_url: tokenUrl,
           twitter: form.twitter,
           telegram: form.telegram,
         }),
@@ -140,6 +146,7 @@ export default function LaunchPage() {
         metadataUri,
         tier: form.tier,
         user: publicKey,
+        baseMint, // ← pre-generated, matches the URL in metadata
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "tx build failed";
