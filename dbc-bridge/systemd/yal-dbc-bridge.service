@@ -1,0 +1,27 @@
+[Unit]
+Description=YAL ↔ Meteora DBC bridge — triggers DAMM v2 migration once a YAL meme bonds its threshold
+Documentation=https://github.com/kekloldyormarket/yal/tree/main/dbc-bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sol
+WorkingDirectory=/home/sol/yal/dbc-bridge
+ExecStart=/usr/local/bin/bun run src/index.ts
+Restart=on-failure
+RestartSec=15
+# Daemon polls every 30s. Signs migration txns with the keypair that's
+# configured as feeClaimer/creator on the deployed DBC configs.
+Environment=YAL_BRIDGE_KEYPAIR=/home/sol/yal-bridge.json
+Environment=RPC_URL=http://127.0.0.1:8899
+Environment=YAL_PROGRAM_ID=9zMMi7n47W9NK1aokyNZSaSqExz2n9nyASJNpE9eNDKL
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=yal-dbc-bridge
+Nice=10
+IOSchedulingClass=idle
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
