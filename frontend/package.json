@@ -8,14 +8,13 @@
     "start": "next start"
   },
   "dependencies": {
-    "@coral-xyz/anchor": "^0.31.1",
-    "@solana/wallet-adapter-base": "^0.10",
-    "@solana/wallet-adapter-react": "^0.16",
-    "@solana/wallet-adapter-react-ui": "^0.10",
-    "@solana/wallet-adapter-wallets": "^0.20",
+    "@noble/hashes": "^1.4.0",
     "@solana/web3.js": "^1.98.0",
     "next": "^16.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.15"
   }
 }

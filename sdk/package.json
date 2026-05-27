@@ -13,6 +13,7 @@
     "./account": "./src/account.ts"
   },
   "dependencies": {
+    "@noble/hashes": "^1.4.0",
     "@solana/web3.js": "^1.98.0"
   }
 }

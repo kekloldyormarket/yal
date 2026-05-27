@@ -9,26 +9,30 @@ import {
   YAL_PROGRAM_ID,
   STACSOL,
   TOKEN_2022_PROGRAM,
-} from "./constants.js";
+} from "./constants";
 
 // Anchor discriminator = sha256("global:<ix_name>")[:8]
 // @noble/hashes is isomorphic so this works in both Node and browser bundles.
-function disc(name: string): Buffer {
-  const h = sha256(new TextEncoder().encode(`global:${name}`));
-  return Buffer.from(h.subarray(0, 8));
+function disc(name: string): Uint8Array {
+  return sha256(new TextEncoder().encode(`global:${name}`)).subarray(0, 8);
+}
+
+// Build the instruction data buffer = [8-byte discriminator, u64 arg LE].
+function buildData(name: string, arg: bigint): Buffer {
+  const data = Buffer.alloc(16);
+  data.set(disc(name), 0);
+  data.writeBigUInt64LE(arg, 8);
+  return data;
 }
 
 export function registerTokenIx(args: {
   yalToken: PublicKey;
   memeMint: PublicKey;
-  treasuryAta: PublicKey;            // freshly generated keypair, signer
-  authority: PublicKey;              // payer + signer
-  stacsolTokenProgram?: PublicKey;   // defaults to Token-2022
+  treasuryAta: PublicKey;
+  authority: PublicKey;
+  stacsolTokenProgram?: PublicKey;
   totalSupply: bigint;
 }): TransactionInstruction {
-  const data = Buffer.alloc(16);
-  disc("register_token").copy(data, 0);
-  data.writeBigUInt64LE(args.totalSupply, 8);
   return new TransactionInstruction({
     programId: YAL_PROGRAM_ID,
     keys: [
@@ -41,7 +45,7 @@ export function registerTokenIx(args: {
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
       { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
     ],
-    data,
+    data: buildData("register_token", args.totalSupply),
   });
 }
 
@@ -50,9 +54,6 @@ export function fundTreasuryIx(args: {
   funder: PublicKey;
   lamports: bigint;
 }): TransactionInstruction {
-  const data = Buffer.alloc(16);
-  disc("fund_treasury").copy(data, 0);
-  data.writeBigUInt64LE(args.lamports, 8);
   return new TransactionInstruction({
     programId: YAL_PROGRAM_ID,
     keys: [
@@ -60,7 +61,7 @@ export function fundTreasuryIx(args: {
       { pubkey: args.funder, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
-    data,
+    data: buildData("fund_treasury", args.lamports),
   });
 }
 
@@ -69,9 +70,6 @@ export function depositToStacsolIx(args: {
   treasuryAta: PublicKey;
   lamports: bigint;
 }): TransactionInstruction {
-  const data = Buffer.alloc(16);
-  disc("deposit_to_stacsol").copy(data, 0);
-  data.writeBigUInt64LE(args.lamports, 8);
   return new TransactionInstruction({
     programId: YAL_PROGRAM_ID,
     keys: [
@@ -85,7 +83,7 @@ export function depositToStacsolIx(args: {
       { pubkey: TOKEN_2022_PROGRAM, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
-    data,
+    data: buildData("deposit_to_stacsol", args.lamports),
   });
 }
 
@@ -99,9 +97,6 @@ export function redeemIx(args: {
   memeTokenProgram: PublicKey;
   memeAmount: bigint;
 }): TransactionInstruction {
-  const data = Buffer.alloc(16);
-  disc("redeem").copy(data, 0);
-  data.writeBigUInt64LE(args.memeAmount, 8);
   return new TransactionInstruction({
     programId: YAL_PROGRAM_ID,
     keys: [
@@ -115,6 +110,6 @@ export function redeemIx(args: {
       { pubkey: args.memeTokenProgram, isSigner: false, isWritable: false },
       { pubkey: TOKEN_2022_PROGRAM, isSigner: false, isWritable: false },
     ],
-    data,
+    data: buildData("redeem", args.memeAmount),
   });
 }

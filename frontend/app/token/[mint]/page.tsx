@@ -1,0 +1,947 @@
+"use client";
+
+import Link from "next/link";
+import { use, useMemo, useState } from "react";
+import { fmt } from "@/lib/format";
+import { Stat } from "@/components/Primitives";
+import { floorOf, priceAt, GRADUATION_THRESHOLD_SOL, STACSOL, YAL_PROGRAM_ID_STR } from "@/lib/yal-client";
+import { useYal } from "../../providers";
+import type { UiToken } from "@/lib/types";
+
+export default function TokenPage({
+  params,
+}: {
+  params: Promise<{ mint: string }>;
+}) {
+  const { mint } = use(params);
+  const { tokens, tokenLoading, wallet, nav, pushToast, applyLocalRedeem, applyLocalBuy, applyLocalSell } = useYal();
+  const token = tokens.find((t) => t.mint === mint);
+
+  if (!token) {
+    if (tokenLoading) {
+      return (
+        <div className="container">
+          <div className="panel" style={{ padding: 48, textAlign: "center" }}>
+            <pre className="ascii" style={{ color: "var(--text-3)" }}>{`  ┌──────────┐
+  │ loading  │
+  └──────────┘`}</pre>
+            <p className="muted" style={{ marginTop: 12 }}>
+              fetching on-chain state…
+            </p>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="container">
+        <div className="panel" style={{ padding: 48, textAlign: "center" }}>
+          <pre className="ascii" style={{ color: "var(--text-3)" }}>{`  ┌──────────┐
+  │ 404 mint │
+  └──────────┘`}</pre>
+          <p className="muted" style={{ marginTop: 12 }}>
+            that mint isn&apos;t registered with the YAL router.
+          </p>
+          <p style={{ marginTop: 16 }}>
+            <Link href="/" className="accent">
+              ← back to tokens
+            </Link>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const isGrad = token.status === "graduated";
+
+  return (
+    <div className="container">
+      <TokenTop token={token} />
+      <div className="grid-token">
+        <div>
+          {isGrad ? <TreasuryPanel token={token} nav={nav} /> : <BondingChartPanel token={token} />}
+          <div style={{ height: 16 }} />
+          <ActivityPanel token={token} />
+          <div style={{ height: 16 }} />
+          <AboutPanel />
+        </div>
+        <div>
+          {isGrad ? (
+            <RedeemPanel
+              token={token}
+              wallet={wallet}
+              nav={nav}
+              onRedeem={(amt) => {
+                const r = applyLocalRedeem(token.mint, amt);
+                if (r)
+                  pushToast({
+                    title: "redeemed " + fmt.num(amt) + " $" + token.ticker,
+                    sub: r.stacsol_received.toFixed(4) + " stacSOL received",
+                  });
+                return r;
+              }}
+            />
+          ) : (
+            <BuySellPanel
+              token={token}
+              wallet={wallet}
+              onBuy={(solAmount, expected) => {
+                applyLocalBuy(token.mint, solAmount, expected);
+                pushToast({
+                  title: "bought $" + token.ticker,
+                  sub: fmt.num(expected) + " for " + solAmount.toFixed(3) + " sol",
+                });
+              }}
+              onSell={(tickerAmt, expected) => {
+                applyLocalSell(token.mint, tickerAmt, expected);
+                pushToast({
+                  title: "sold $" + token.ticker,
+                  sub: expected.toFixed(4) + " sol",
+                });
+              }}
+            />
+          )}
+          <div style={{ height: 16 }} />
+          <TokenMetaPanel token={token} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TokenTop({ token }: { token: UiToken }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    try {
+      navigator.clipboard.writeText(token.mint);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1000);
+    } catch {}
+  }
+  return (
+    <div className="token-top">
+      {token.img ? (
+        <img
+          src={token.img}
+          alt=""
+          style={{
+            width: 80,
+            height: 80,
+            objectFit: "cover",
+            border: "1px solid var(--border-2)",
+          }}
+        />
+      ) : (
+        <div className="avatar xl">{token.ticker.slice(0, 2)}</div>
+      )}
+      <div className="meta">
+        <div>
+          <span className="name">${token.ticker}</span>
+          <span className="ticker">· {token.name}</span>
+          {token.status === "graduated" ? (
+            <span className="badge grad" style={{ marginLeft: 10 }}>
+              graduated
+            </span>
+          ) : (
+            <span className="badge bond" style={{ marginLeft: 10 }}>
+              bonding · {(token.progress * 100).toFixed(0)}%
+            </span>
+          )}
+        </div>
+        <p className="desc">{token.desc}</p>
+        <div className="addr" onClick={copy}>
+          mint · {fmt.short(token.mint, 8, 8)}{" "}
+          {copied ? <span className="accent">copied</span> : <span className="muted">copy</span>}
+        </div>
+      </div>
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          alignItems: "flex-start",
+          flexWrap: "wrap",
+        }}
+      >
+        <a
+          className="btn"
+          href={"https://solscan.io/token/" + token.mint}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          solscan
+        </a>
+        <Link className="btn" href="/leaderboard">
+          leaderboard
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function BondingChartPanel({ token }: { token: UiToken }) {
+  const pts = useMemo(() => makeBondHistory(token), [token.mint, token.bonded_sol]);
+  const max = GRADUATION_THRESHOLD_SOL;
+  const W = 560,
+    H = 240;
+  const padL = 40,
+    padR = 12,
+    padT = 12,
+    padB = 28;
+  const xs = (i: number) => padL + (i / (pts.length - 1)) * (W - padL - padR);
+  const ys = (v: number) => H - padB - (v / max) * (H - padT - padB);
+  const path = pts.map((p, i) => (i === 0 ? "M" : "L") + xs(i) + " " + ys(p.v)).join(" ");
+  const area =
+    path +
+    " L " +
+    xs(pts.length - 1) +
+    " " +
+    (H - padB) +
+    " L " +
+    xs(0) +
+    " " +
+    (H - padB) +
+    " Z";
+  const gradY = ys(max);
+  const price = priceAt(token.progress);
+
+  return (
+    <div className="panel">
+      <div className="panel-h">
+        bonding curve
+        <span className="badge live" style={{ marginLeft: "auto" }}>
+          ● live
+        </span>
+      </div>
+      <div className="panel-body" style={{ paddingBottom: 12 }}>
+        <div
+          className="grid-4"
+          style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 12 }}
+        >
+          <Stat
+            k="bonded"
+            v={token.bonded_sol.toFixed(2) + " sol"}
+            sub={`/ ${GRADUATION_THRESHOLD_SOL} sol target`}
+            accent
+          />
+          <Stat
+            k="progress"
+            v={(token.progress * 100).toFixed(1) + "%"}
+            sub="to graduation"
+          />
+          <Stat k="price · sol" v={price.toFixed(8)} sub="bond curve approx" />
+          <Stat
+            k="age"
+            v={token.created_at ? fmt.agoTs(token.created_at) : "—"}
+            sub={token.created_at ? "since launch" : "indexer pending"}
+          />
+        </div>
+
+        <div className="progress" style={{ height: 12, marginBottom: 18 }}>
+          <div
+            className="progress-fill"
+            style={{ width: token.progress * 100 + "%" }}
+          />
+        </div>
+
+        <div
+          className="chart-wrap"
+          style={{ aspectRatio: W + "/" + H, marginBottom: 12 }}
+        >
+          <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+            {[0, 20, 40, 60, 80].map((v) => (
+              <g key={v}>
+                <line
+                  className="chart-grid"
+                  x1={padL}
+                  x2={W - padR}
+                  y1={ys(v)}
+                  y2={ys(v)}
+                />
+                <text
+                  className="chart-axis"
+                  x={padL - 6}
+                  y={ys(v) + 3}
+                  textAnchor="end"
+                >
+                  {v}
+                </text>
+              </g>
+            ))}
+            <path className="chart-fill" d={area} />
+            <path className="chart-line" d={path} />
+            <line
+              className="chart-grad"
+              x1={padL}
+              x2={W - padR}
+              y1={gradY}
+              y2={gradY}
+            />
+            <text
+              className="chart-axis accent"
+              x={W - padR - 4}
+              y={gradY - 4}
+              textAnchor="end"
+              style={{ fill: "var(--accent)" }}
+            >
+              GRADUATE @ {GRADUATION_THRESHOLD_SOL} SOL
+            </text>
+            <text className="chart-axis" x={padL} y={H - 10}>
+              {token.created_at ? fmt.agoTs(token.created_at) + " ago" : "—"}
+            </text>
+            <text
+              className="chart-axis"
+              x={W - padR}
+              y={H - 10}
+              textAnchor="end"
+            >
+              now
+            </text>
+          </svg>
+        </div>
+
+        <p className="muted" style={{ fontSize: 11 }}>
+          when bonded SOL hits {GRADUATION_THRESHOLD_SOL}, curve closes. all bonded SOL routes to the YAL
+          router and converts to <span className="accent">stacSOL</span> backing
+          for the treasury.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function BuySellPanel({
+  token,
+  wallet,
+  onBuy,
+  onSell,
+}: {
+  token: UiToken;
+  wallet: { balance_sol: number } | null;
+  onBuy: (sol: number, expected: number) => void;
+  onSell: (memeAmt: number, expected: number) => void;
+}) {
+  const [tab, setTab] = useState<"buy" | "sell">("buy");
+  const [amt, setAmt] = useState("");
+  const [working, setWorking] = useState(false);
+  const [slip, setSlip] = useState(2);
+
+  const price = priceAt(token.progress);
+  const parsed = parseFloat(amt);
+  const valid = amt !== "" && !isNaN(parsed) && parsed > 0;
+  const expected = valid
+    ? tab === "buy"
+      ? parsed / price
+      : parsed * price
+    : 0;
+
+  function submit() {
+    if (!valid) return;
+    setWorking(true);
+    setTimeout(() => {
+      if (tab === "buy") onBuy(parsed, expected);
+      else onSell(parsed, expected);
+      setWorking(false);
+      setAmt("");
+    }, 900);
+  }
+
+  return (
+    <div className="panel">
+      <div className="panel-h">
+        trade
+        <span className="badge bond" style={{ marginLeft: "auto" }}>
+          bonding
+        </span>
+      </div>
+      <div className="panel-body">
+        <div className="btn-group" style={{ marginBottom: 16 }}>
+          <button
+            className={"btn " + (tab === "buy" ? "active" : "")}
+            style={{ flex: 1 }}
+            onClick={() => setTab("buy")}
+          >
+            buy
+          </button>
+          <button
+            className={"btn " + (tab === "sell" ? "active" : "")}
+            style={{ flex: 1 }}
+            onClick={() => setTab("sell")}
+          >
+            sell
+          </button>
+        </div>
+
+        <div className="field">
+          <label className="label">
+            {tab === "buy" ? "amount in sol" : "amount in $" + token.ticker}
+          </label>
+          <div style={{ position: "relative" }}>
+            <input
+              type="number"
+              placeholder="0.00"
+              value={amt}
+              onChange={(e) => setAmt(e.target.value)}
+            />
+            <span
+              style={{
+                position: "absolute",
+                right: 12,
+                top: "50%",
+                transform: "translateY(-50%)",
+                color: "var(--text-3)",
+                fontSize: 11,
+              }}
+            >
+              {tab === "buy" ? "SOL" : token.ticker}
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+            {(tab === "buy" ? [0.1, 0.5, 1, 5] : [25, 50, 75, 100]).map((v) => (
+              <button
+                key={v}
+                className="btn"
+                style={{ height: 26, padding: "0 8px", fontSize: 10, flex: 1 }}
+                onClick={() => setAmt(String(v))}
+              >
+                {tab === "buy" ? v + " sol" : v + "%"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="kv">
+          <span className="k">price</span>
+          <span className="v num">{price.toFixed(10)} sol</span>
+        </div>
+        <div className="kv">
+          <span className="k">you receive ≈</span>
+          <span className="v num accent">
+            {valid
+              ? tab === "buy"
+                ? fmt.num(expected, 0) + " " + token.ticker
+                : expected.toFixed(6) + " sol"
+              : "—"}
+          </span>
+        </div>
+        <div className="kv">
+          <span className="k">slippage</span>
+          <span className="v">
+            {[1, 2, 5].map((s) => (
+              <span
+                key={s}
+                onClick={() => setSlip(s)}
+                style={{
+                  marginLeft: 8,
+                  cursor: "pointer",
+                  color: slip === s ? "var(--accent)" : "var(--text-3)",
+                  borderBottom:
+                    slip === s ? "1px solid var(--accent)" : "none",
+                }}
+              >
+                {s}%
+              </span>
+            ))}
+          </span>
+        </div>
+
+        <hr className="hr" />
+
+        <button
+          className="btn primary xl"
+          style={{ width: "100%" }}
+          disabled={!wallet || working || !valid}
+          onClick={submit}
+        >
+          {!wallet
+            ? "connect wallet"
+            : working
+              ? "signing…"
+              : tab === "buy"
+                ? "buy " + token.ticker
+                : "sell " + token.ticker}
+        </button>
+
+        <div className="hr-dashed" />
+        <p className="muted" style={{ fontSize: 10, lineHeight: 1.5 }}>
+          mock execution. real version routes through Meteora DBC. on
+          graduation ({GRADUATION_THRESHOLD_SOL} sol bonded), bonded SOL transfers to the YAL router for
+          stacSOL conversion.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function TreasuryPanel({ token, nav }: { token: UiToken; nav: number }) {
+  const backing_sol = token.treasury_stacsol * nav;
+  const floor = floorOf(token, nav);
+
+  return (
+    <div>
+      <div className="grid-2" style={{ marginBottom: 16 }}>
+        <div className="big-num">
+          <div className="k">treasury · stacSOL</div>
+          <div className="v accent">{token.treasury_stacsol.toFixed(3)}</div>
+          <div className="sub">
+            ≈ {backing_sol.toFixed(3)} sol @ {nav.toFixed(5)} nav
+          </div>
+        </div>
+        <div className="big-num">
+          <div className="k">redemption floor · sol/meme</div>
+          <div className="v">{floor > 0 ? floor.toExponential(3) : "—"}</div>
+          <div className="sub">supply down · nav up · floor up</div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-h">treasury composition</div>
+        <div className="panel-body">
+          <div className="kv">
+            <span className="k">stacSOL balance</span>
+            <span className="v num accent">{token.treasury_stacsol.toFixed(6)}</span>
+          </div>
+          <div className="kv">
+            <span className="k">stacSOL → sol equiv</span>
+            <span className="v num">{backing_sol.toFixed(6)} sol</span>
+          </div>
+          <div className="kv">
+            <span className="k">stacSOL NAV (live)</span>
+            <span className="v num">{nav.toFixed(6)}</span>
+          </div>
+          <div className="kv">
+            <span className="k">total supply</span>
+            <span className="v num">{fmt.num(token.total_supply)}</span>
+          </div>
+          <div className="kv">
+            <span className="k">circulating supply</span>
+            <span className="v num">{fmt.num(token.circulating_supply)}</span>
+          </div>
+          <div className="kv">
+            <span className="k">burned via redeem</span>
+            <span className="v num">{fmt.num(token.redeemed_meme)}</span>
+          </div>
+          <div className="kv">
+            <span className="k">bonded at graduation</span>
+            <span className="v num">{token.bonded_sol.toFixed(3)} sol</span>
+          </div>
+          <div className="kv">
+            <span className="k">graduated</span>
+            <span className="v">{fmt.agoTs(token.graduated_at)} ago</span>
+          </div>
+          <div className="kv">
+            <span className="k">last redemption</span>
+            <span className="v">
+              {token.last_liquidation_ts
+                ? fmt.agoTs(token.last_liquidation_ts) + " ago"
+                : "—"}
+            </span>
+          </div>
+          <hr className="hr" />
+          <div className="mono-block">
+            <span className="muted">// the math</span>
+            <br />
+            stacsol_received = (meme_amount / circulating_supply) ×
+            treasury_stacsol
+            <br />
+            sol_equivalent &nbsp;&nbsp; = stacsol_received × NAV
+            <br />
+            <span className="accent">effective_floor</span> &nbsp; =
+            sol_equivalent / meme_amount
+            <br />
+            <br />
+            <span className="accent">
+              {floor > 0 ? floor.toExponential(6) : "0"}
+            </span>{" "}
+            sol per ${token.ticker}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RedeemPanel({
+  token,
+  wallet,
+  nav,
+  onRedeem,
+}: {
+  token: UiToken;
+  wallet: { holdings: Record<string, number> } | null;
+  nav: number;
+  onRedeem: (amt: number) => { stacsol_received: number; sol_received: number } | null;
+}) {
+  const [amt, setAmt] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [working, setWorking] = useState(false);
+  const [result, setResult] = useState<{ stacsol_received: number; sol_received: number } | null>(null);
+
+  const userBal = wallet?.holdings[token.mint] || 0;
+  const parsedAmt = parseFloat(amt) || 0;
+  const stacsol_received =
+    token.circulating_supply > 0
+      ? (parsedAmt / token.circulating_supply) * token.treasury_stacsol
+      : 0;
+  const sol_received = stacsol_received * nav;
+  const effective_floor = parsedAmt > 0 ? sol_received / parsedAmt : 0;
+
+  function pct(p: number) {
+    setAmt(String(Math.floor(userBal * p)));
+  }
+
+  function review() {
+    if (!parsedAmt || parsedAmt > userBal) return;
+    setConfirming(true);
+  }
+
+  function confirm() {
+    setWorking(true);
+    setTimeout(() => {
+      const r = onRedeem(parsedAmt);
+      setResult(r);
+      setWorking(false);
+    }, 1100);
+  }
+
+  function reset() {
+    setConfirming(false);
+    setResult(null);
+    setAmt("");
+  }
+
+  return (
+    <div className="panel" style={{ borderColor: "var(--accent-dim)" }}>
+      <div className="panel-h" style={{ background: "var(--accent-faint)" }}>
+        <span style={{ color: "var(--accent)", fontWeight: 700 }}>redeem</span>
+        <span className="badge grad" style={{ marginLeft: "auto" }}>
+          burn → claim
+        </span>
+      </div>
+      <div className="panel-body">
+        {!confirming && !result && (
+          <>
+            <div className="field">
+              <label className="label">
+                amount of ${token.ticker} to burn
+                <span
+                  style={{
+                    float: "right",
+                    color: "var(--text-3)",
+                    textTransform: "none",
+                    letterSpacing: 0,
+                  }}
+                >
+                  balance · {wallet ? fmt.num(userBal) : "—"}
+                </span>
+              </label>
+              <input
+                type="number"
+                placeholder="0"
+                value={amt}
+                onChange={(e) => setAmt(e.target.value)}
+              />
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                {[0.25, 0.5, 0.75, 1].map((p) => (
+                  <button
+                    key={p}
+                    className="btn"
+                    style={{
+                      height: 26,
+                      padding: "0 8px",
+                      fontSize: 10,
+                      flex: 1,
+                    }}
+                    onClick={() => pct(p)}
+                    disabled={!wallet}
+                  >
+                    {p === 1 ? "max" : p * 100 + "%"}
+                  </button>
+                ))}
+              </div>
+              {parsedAmt > userBal && wallet && (
+                <div className="err">exceeds balance.</div>
+              )}
+            </div>
+
+            <div className="kv">
+              <span className="k">you burn</span>
+              <span className="v num">
+                {fmt.num(parsedAmt)} ${token.ticker}
+              </span>
+            </div>
+            <div className="kv">
+              <span className="k">share of supply</span>
+              <span className="v num">
+                {token.circulating_supply > 0
+                  ? fmt.pct(parsedAmt / token.circulating_supply, 4)
+                  : "—"}
+              </span>
+            </div>
+            <div className="kv">
+              <span className="k">stacsol received</span>
+              <span className="v num accent">
+                {stacsol_received.toFixed(6)}
+              </span>
+            </div>
+            <div className="kv">
+              <span className="k">≈ sol value</span>
+              <span className="v num">{sol_received.toFixed(6)}</span>
+            </div>
+            <div className="kv">
+              <span className="k">your effective floor</span>
+              <span className="v num">
+                {effective_floor > 0
+                  ? effective_floor.toExponential(3) + " sol/meme"
+                  : "—"}
+              </span>
+            </div>
+
+            <hr className="hr" />
+
+            <button
+              className="btn primary xl"
+              style={{ width: "100%" }}
+              disabled={!wallet || !parsedAmt || parsedAmt > userBal}
+              onClick={review}
+            >
+              {!wallet
+                ? "connect wallet"
+                : !parsedAmt
+                  ? "enter amount"
+                  : "review redemption →"}
+            </button>
+            <p className="muted" style={{ fontSize: 10, marginTop: 10, lineHeight: 1.5 }}>
+              your meme bonded {token.bonded_sol.toFixed(2)} sol, which became{" "}
+              {token.treasury_stacsol.toFixed(2)} stacSOL backing. burn your
+              meme to claim your share.
+            </p>
+          </>
+        )}
+
+        {confirming && !result && (
+          <>
+            <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
+              <pre className="ascii" style={{ color: "var(--accent)" }}>{`  ┌─────────────┐
+  │   confirm   │
+  │   redeem    │
+  └─────────────┘`}</pre>
+            </div>
+            <div className="kv">
+              <span className="k">burning</span>
+              <span className="v num">
+                {fmt.num(parsedAmt)} ${token.ticker}
+              </span>
+            </div>
+            <div className="kv">
+              <span className="k">receiving</span>
+              <span className="v num accent">
+                {stacsol_received.toFixed(6)} stacSOL
+              </span>
+            </div>
+            <div className="kv">
+              <span className="k">≈ sol</span>
+              <span className="v num">{sol_received.toFixed(6)}</span>
+            </div>
+            <div className="kv">
+              <span className="k">program</span>
+              <span className="v">{fmt.short(YAL_PROGRAM_ID_STR, 6, 6)}</span>
+            </div>
+            <div className="kv">
+              <span className="k">instruction</span>
+              <span className="v">redeem(meme_amount)</span>
+            </div>
+            <hr className="hr" />
+            <div className="mono-block" style={{ marginBottom: 12 }}>
+              accounts:
+              <br />
+              {"  "}yal_token (PDA)
+              <br />
+              {"  "}meme_mint
+              <br />
+              {"  "}user_meme_ata
+              <br />
+              {"  "}treasury_stacsol_ata
+              <br />
+              {"  "}user_stacsol_ata
+              <br />
+              {"  "}stacsol_mint
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="btn"
+                style={{ flex: 1 }}
+                onClick={reset}
+                disabled={working}
+              >
+                cancel
+              </button>
+              <button
+                className="btn primary"
+                style={{ flex: 2 }}
+                onClick={confirm}
+                disabled={working}
+              >
+                {working ? "signing…" : "sign + send"}
+              </button>
+            </div>
+          </>
+        )}
+
+        {result && (
+          <>
+            <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
+              <pre className="ascii" style={{ color: "var(--accent)" }}>{`  ╔═════════════╗
+  ║  redeemed   ║
+  ╚═════════════╝`}</pre>
+            </div>
+            <div className="kv">
+              <span className="k">burned</span>
+              <span className="v num">{fmt.num(parsedAmt)}</span>
+            </div>
+            <div className="kv">
+              <span className="k">stacsol received</span>
+              <span className="v num accent">
+                {result.stacsol_received.toFixed(6)}
+              </span>
+            </div>
+            <div className="kv">
+              <span className="k">sol equivalent</span>
+              <span className="v num">{result.sol_received.toFixed(6)}</span>
+            </div>
+            <button
+              className="btn primary"
+              style={{ width: "100%", marginTop: 14 }}
+              onClick={reset}
+            >
+              redeem more
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ActivityPanel({ token: _token }: { token: UiToken }) {
+  return (
+    <div className="panel">
+      <div className="panel-h">recent activity</div>
+      <div className="panel-body" style={{ padding: "24px 16px", textAlign: "center" }}>
+        <p className="muted" style={{ fontSize: 11 }}>
+          indexer pending. on-chain signatures will populate here once the
+          activity stream is wired up.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function TokenMetaPanel({ token }: { token: UiToken }) {
+  return (
+    <div className="panel">
+      <div className="panel-h">on-chain</div>
+      <div className="panel-body" style={{ fontSize: 11 }}>
+        <div className="kv">
+          <span className="k">mint</span>
+          <span className="v">{fmt.short(token.mint, 6, 6)}</span>
+        </div>
+        <div className="kv">
+          <span className="k">authority</span>
+          <span className="v">{fmt.short(token.authority, 6, 6)}</span>
+        </div>
+        <div className="kv">
+          <span className="k">treasury ATA</span>
+          <span className="v">{fmt.short(token.treasury_ata, 6, 6)}</span>
+        </div>
+        <div className="kv">
+          <span className="k">yal_token PDA</span>
+          <span className="v">{fmt.short(token.pubkey, 6, 6)}</span>
+        </div>
+        <div className="kv">
+          <span className="k">router program</span>
+          <span className="v">{fmt.short(YAL_PROGRAM_ID_STR, 6, 6)}</span>
+        </div>
+        <div className="kv">
+          <span className="k">stacSOL mint</span>
+          <span className="v">{fmt.short(STACSOL.MINT.toBase58(), 6, 6)}</span>
+        </div>
+        <div className="kv">
+          <span className="k">stacSOL pool</span>
+          <span className="v">{fmt.short(STACSOL.POOL.toBase58(), 6, 6)}</span>
+        </div>
+        <div className="kv">
+          <span className="k">token program</span>
+          <span className="v">Token-2022</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AboutPanel() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="panel">
+      <div
+        className="panel-h"
+        style={{ cursor: "pointer" }}
+        onClick={() => setOpen((o) => !o)}
+      >
+        what is stacSOL?{" "}
+        <span style={{ marginLeft: "auto", color: "var(--text-3)" }}>
+          {open ? "−" : "+"}
+        </span>
+      </div>
+      {open && (
+        <div
+          className="panel-body"
+          style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.7 }}
+        >
+          <p style={{ marginBottom: 10 }}>
+            stacSOL is a single-validator LST running a patched{" "}
+            <span className="accent">agave</span> with native TowerSync
+            multi-slot vote batching.
+          </p>
+          <p style={{ marginBottom: 10 }}>
+            100% commission. all inflation income accrues to NAV. the validator
+            was the proof-of-concept; YAL is the distribution layer.
+          </p>
+          <p style={{ marginBottom: 10 }}>
+            anyone can launch a meme; every graduation grows stacSOL backing
+            forever.
+          </p>
+          <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+            <a
+              className="btn"
+              href="https://stacsol.app"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              stacsol.app
+            </a>
+            <a
+              className="btn"
+              href="https://github.com/kekloldyormarket/agave"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              patched agave
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function makeBondHistory(token: UiToken) {
+  // Deterministic curve approximation purely from current bonded — no fake history.
+  // The line shows the implied "accelerating-to-current" path, not real txns.
+  const total = token.bonded_sol || 0.01;
+  const n = 36;
+  const points: { t: number; v: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    points.push({ t, v: total * Math.pow(t, 1.6) });
+  }
+  return points;
+}
