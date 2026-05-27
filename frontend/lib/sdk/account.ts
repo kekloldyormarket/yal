@@ -19,19 +19,25 @@ export interface YalToken {
 
 const YAL_TOKEN_SIZE = 161;
 
-export function decodeYalToken(pubkey: PublicKey, data: Buffer): YalToken {
+export function decodeYalToken(
+  pubkey: PublicKey,
+  data: Uint8Array,
+): YalToken {
+  // Use DataView for the u64/i64 reads — Next.js's polyfilled Buffer in the
+  // client bundle doesn't expose readBigUInt64LE / readBigInt64LE.
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
   let off = 8; // discriminator
   const memeMint = new PublicKey(data.subarray(off, off + 32)); off += 32;
   const authority = new PublicKey(data.subarray(off, off + 32)); off += 32;
-  const totalSupply = data.readBigUInt64LE(off); off += 8;
-  const circulatingSupply = data.readBigUInt64LE(off); off += 8;
-  const treasuryStacsol = data.readBigUInt64LE(off); off += 8;
-  const treasurySolLamports = data.readBigUInt64LE(off); off += 8;
+  const totalSupply = dv.getBigUint64(off, true); off += 8;
+  const circulatingSupply = dv.getBigUint64(off, true); off += 8;
+  const treasuryStacsol = dv.getBigUint64(off, true); off += 8;
+  const treasurySolLamports = dv.getBigUint64(off, true); off += 8;
   const treasuryTokenAccount = new PublicKey(data.subarray(off, off + 32)); off += 32;
-  const graduatedAt = data.readBigInt64LE(off); off += 8;
-  const lastLiquidationTs = data.readBigInt64LE(off); off += 8;
-  const bondedSolLamports = data.readBigUInt64LE(off); off += 8;
-  const bump = data.readUInt8(off);
+  const graduatedAt = dv.getBigInt64(off, true); off += 8;
+  const lastLiquidationTs = dv.getBigInt64(off, true); off += 8;
+  const bondedSolLamports = dv.getBigUint64(off, true); off += 8;
+  const bump = data[off]!;
   return {
     pubkey, memeMint, authority, totalSupply, circulatingSupply,
     treasuryStacsol, treasurySolLamports, treasuryTokenAccount,
@@ -45,7 +51,7 @@ export async function fetchAllYalTokens(conn: Connection): Promise<YalToken[]> {
     filters: [{ dataSize: YAL_TOKEN_SIZE }],
   });
   return accounts.map(({ pubkey, account }) =>
-    decodeYalToken(pubkey, Buffer.from(account.data))
+    decodeYalToken(pubkey, new Uint8Array(account.data)),
   );
 }
 
@@ -57,7 +63,7 @@ export async function fetchYalTokenByMint(
   const [pubkey] = yalTokenPda(memeMint);
   const acct = await conn.getAccountInfo(pubkey);
   if (!acct) return null;
-  return decodeYalToken(pubkey, Buffer.from(acct.data));
+  return decodeYalToken(pubkey, new Uint8Array(acct.data));
 }
 
 /**

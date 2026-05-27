@@ -19,11 +19,12 @@ const POOL_TOKEN_SUPPLY_OFFSET = 266;
 export async function fetchNav(conn: Connection): Promise<number> {
   const acct = await conn.getAccountInfo(STACSOL.POOL);
   if (!acct) throw new Error("stacSOL pool account not found");
-  const data = acct.data;
-  const totalLamports = data.readBigUInt64LE(POOL_TOTAL_LAMPORTS_OFFSET);
-  const poolTokenSupply = data.readBigUInt64LE(POOL_TOKEN_SUPPLY_OFFSET);
+  // DataView u64 read — browser's polyfilled Buffer lacks readBigUInt64LE.
+  const u8 = new Uint8Array(acct.data);
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const totalLamports = dv.getBigUint64(POOL_TOTAL_LAMPORTS_OFFSET, true);
+  const poolTokenSupply = dv.getBigUint64(POOL_TOKEN_SUPPLY_OFFSET, true);
   if (poolTokenSupply === 0n) return 1;
-  // Use float math — supply is bounded and we just need NAV display precision.
   return Number(totalLamports) / Number(poolTokenSupply);
 }
 
