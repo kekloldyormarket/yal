@@ -41,7 +41,10 @@ export function appendTip(tx: Transaction, from: PublicKey): void {
   );
 }
 
-/** Submit a signed raw tx to Helius Sender. Returns the signature. */
+/** Submit a signed raw tx to Helius Sender. Returns the signature.
+ *  skipPreflight=true — we control the tx construction so the Sender's
+ *  simulation node (which can be slightly behind the slot tip) doesn't
+ *  reject us with stale-blockhash false positives. */
 export async function sendViaSender(rawTx: Uint8Array | Buffer): Promise<string> {
   const body = {
     jsonrpc: "2.0",
@@ -49,7 +52,7 @@ export async function sendViaSender(rawTx: Uint8Array | Buffer): Promise<string>
     method: "sendTransaction",
     params: [
       Buffer.from(rawTx).toString("base64"),
-      { encoding: "base64", skipPreflight: false, maxRetries: 0 },
+      { encoding: "base64", skipPreflight: true, maxRetries: 0 },
     ],
   };
   const r = await fetch(HELIUS_SENDER_URL, {

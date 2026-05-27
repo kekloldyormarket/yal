@@ -112,13 +112,28 @@ export async function buildLaunchTx(
   });
   const registerTx = new Transaction().add(ix);
 
-  const { blockhash } = await conn.getLatestBlockhash("confirmed");
+  // Use `finalized` commitment so Helius Sender's Jito/Staked Connection
+  // nodes have all seen this blockhash by the time they receive the tx.
+  // `confirmed` blockhashes can be too fresh for downstream nodes still
+  // catching up and trigger BlockhashNotFound.
+  const { blockhash } = await conn.getLatestBlockhash("finalized");
   meteoraTx.recentBlockhash = blockhash;
   meteoraTx.feePayer = input.user;
   registerTx.recentBlockhash = blockhash;
   registerTx.feePayer = input.user;
 
   return { baseMint, treasuryAta, meteoraTx, registerTx, yalToken };
+}
+
+/** Refresh the recentBlockhash on both launch txs right before signing.
+ *  Call this AFTER metadata upload + AFTER any prep step that took >1s. */
+export async function refreshBlockhash(
+  conn: Connection,
+  built: BuiltLaunchTx,
+): Promise<void> {
+  const { blockhash } = await conn.getLatestBlockhash("finalized");
+  built.meteoraTx.recentBlockhash = blockhash;
+  built.registerTx.recentBlockhash = blockhash;
 }
 
 export function launchReadiness(_tier: GraduationTier): {

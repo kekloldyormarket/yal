@@ -5,7 +5,12 @@ import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useYal } from "../providers";
 import type { UiToken } from "@/lib/types";
-import { TIER_LABELS, type GraduationTier, buildLaunchTx } from "@/lib/launch-tx";
+import {
+  TIER_LABELS,
+  type GraduationTier,
+  buildLaunchTx,
+  refreshBlockhash,
+} from "@/lib/launch-tx";
 import { appendTip, sendViaSender } from "@/lib/sender";
 
 type LaunchForm = {
@@ -143,11 +148,14 @@ export default function LaunchPage() {
       return;
     }
 
-    // 3. Append Jito tip to each tx + partialSign with co-signers, then sign
-    //    BOTH with a single wallet popup via signAllTransactions.
+    // 3. Append Jito tip + co-signer sigs + refresh blockhash right before
+    //    user signing, then sign BOTH with a single wallet popup.
     try {
       appendTip(built.meteoraTx, publicKey);
       appendTip(built.registerTx, publicKey);
+      // Fresh blockhash AFTER metadata upload, BEFORE partialSign/user sign
+      // — keeps the blockhash close to "now" when Sender receives the tx.
+      await refreshBlockhash(connection, built);
       built.meteoraTx.partialSign(built.baseMint);
       built.registerTx.partialSign(built.treasuryAta);
 
