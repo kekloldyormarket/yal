@@ -4,7 +4,7 @@ import Link from "next/link";
 import { use, useEffect, useMemo, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { fmt } from "@/lib/format";
+import { fmt, STACSOL_NET_FACTOR } from "@/lib/format";
 import { Stat } from "@/components/Primitives";
 import { floorOf, priceAt, GRADUATION_THRESHOLD_SOL, STACSOL, YAL_PROGRAM_ID_STR, toUiToken } from "@/lib/yal-client";
 import { fetchYalTokenByMint, registerTokenIx, yalTokenPda } from "@/lib/sdk";
@@ -613,22 +613,32 @@ function BuySellPanel({
 }
 
 function TreasuryPanel({ token, nav }: { token: UiToken; nav: number }) {
-  const backing_sol = token.treasury_stacsol * nav;
-  const floor = floorOf(token, nav);
+  const { connection } = useYal();
+  // Use the live treasury ATA balance — the on-chain truth. The stored
+  // token.treasury_stacsol field lags when SOL is deposited via direct
+  // Sanctum CPI (which doesn't increment the YAL state).
+  const liveStacsol = useTreasuryStacsol(connection, token.treasury_ata);
+  const effectiveStacsol = Math.max(liveStacsol, token.treasury_stacsol);
+  const backing_sol = effectiveStacsol * nav;
+  // Floor accounts for the 6.9% stacSOL transfer fee that hits the user on
+  // claim. effective sol-per-meme = backing_sol × 0.931 / circulating.
+  const floor = token.circulating_supply > 0
+    ? (backing_sol * STACSOL_NET_FACTOR) / token.circulating_supply
+    : 0;
 
   return (
     <div>
       <div className="grid-2" style={{ marginBottom: 16 }}>
         <div className="big-num">
           <div className="k">treasury · stacSOL</div>
-          <div className="v accent">{token.treasury_stacsol.toFixed(3)}</div>
+          <div className="v accent">{effectiveStacsol.toFixed(3)}</div>
           <div className="sub">
             ≈ {backing_sol.toFixed(3)} sol @ {nav.toFixed(5)} nav
           </div>
         </div>
         <div className="big-num">
           <div className="k">redemption floor · sol/meme</div>
-          <div className="v">{floor > 0 ? floor.toExponential(3) : "—"}</div>
+          <div className="v">{floor > 0 ? fmt.dec(floor, 4) : "—"}</div>
           <div className="sub">supply down · nav up · floor up</div>
         </div>
       </div>
@@ -638,7 +648,7 @@ function TreasuryPanel({ token, nav }: { token: UiToken; nav: number }) {
         <div className="panel-body">
           <div className="kv">
             <span className="k">stacSOL balance</span>
-            <span className="v num accent">{token.treasury_stacsol.toFixed(6)}</span>
+            <span className="v num accent">{effectiveStacsol.toFixed(6)}</span>
           </div>
           <div className="kv">
             <span className="k">stacSOL → sol equiv</span>
@@ -680,8 +690,10 @@ function TreasuryPanel({ token, nav }: { token: UiToken; nav: number }) {
           <div className="mono-block">
             <span className="muted">// the math</span>
             <br />
-            stacsol_received = (meme_amount / circulating_supply) ×
+            gross_stacsol &nbsp;&nbsp;= (meme_amount / circulating_supply) ×
             treasury_stacsol
+            <br />
+            stacsol_received = gross_stacsol × 0.931 &nbsp;<span className="muted">// 6.9% xfer fee</span>
             <br />
             sol_equivalent &nbsp;&nbsp; = stacsol_received × NAV
             <br />
@@ -690,7 +702,7 @@ function TreasuryPanel({ token, nav }: { token: UiToken; nav: number }) {
             <br />
             <br />
             <span className="accent">
-              {floor > 0 ? floor.toExponential(6) : "0"}
+              {floor > 0 ? fmt.dec(floor, 6) : "0"}
             </span>{" "}
             sol per ${token.ticker}
           </div>
@@ -723,10 +735,14 @@ function RedeemPanel({
 
   const userBal = wallet?.holdings[token.mint] || 0;
   const parsedAmt = parseFloat(amt) || 0;
-  const stacsol_received =
+  // Gross before the stacSOL Token-2022 transfer fee. The on-chain redeem
+  // transfers stacSOL out of the treasury → 6.9% gets clipped → user nets
+  // 93.1%. Show net so the displayed amount matches what lands.
+  const stacsol_gross =
     token.circulating_supply > 0
       ? (parsedAmt / token.circulating_supply) * effectiveTreasury
       : 0;
+  const stacsol_received = stacsol_gross * STACSOL_NET_FACTOR;
   const sol_received = stacsol_received * nav;
   const effective_floor = parsedAmt > 0 ? sol_received / parsedAmt : 0;
 
@@ -837,7 +853,7 @@ function RedeemPanel({
               <span className="k">your effective floor</span>
               <span className="v num">
                 {effective_floor > 0
-                  ? effective_floor.toExponential(3) + " sol/meme"
+                  ? fmt.dec(effective_floor, 4) + " sol/meme"
                   : "—"}
               </span>
             </div>

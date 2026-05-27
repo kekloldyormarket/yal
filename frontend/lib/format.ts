@@ -41,4 +41,21 @@ export const fmt = {
     if (l === undefined || l === null) return 0;
     return Number(l) / 1e9;
   },
+  /** Plain decimal — no scientific notation, even for tiny numbers. Useful
+   *  for floor / sol-per-meme displays where 7.409e-10 reads as cryptic. */
+  dec(n: number | undefined | null, sigFigs = 4): string {
+    if (n === undefined || n === null || !isFinite(n)) return "—";
+    if (n === 0) return "0";
+    const abs = Math.abs(n);
+    if (abs >= 1) return n.toFixed(Math.max(0, sigFigs));
+    const exp = Math.floor(Math.log10(abs));
+    const decimals = Math.max(sigFigs, -exp + sigFigs - 1);
+    return n.toFixed(decimals);
+  },
 };
+
+/** Token-2022 transfer fee on stacSOL — 6.9% (690 bps). Applied on every
+ *  in/out movement of the LST. When redeeming, the user's net receive is
+ *  computed_amount × (1 - 0.069). */
+export const STACSOL_TRANSFER_FEE_BPS = 690;
+export const STACSOL_NET_FACTOR = 1 - STACSOL_TRANSFER_FEE_BPS / 10_000;

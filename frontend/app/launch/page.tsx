@@ -172,33 +172,17 @@ export default function LaunchPage() {
         built.registerTx,
       ]);
 
-      // 4. Simulate locally BEFORE submitting — catches on-chain errors
-      //    while the tx hasn't been broadcast yet, so the user isn't charged
-      //    for a tx that's guaranteed to fail.
-      const [simMeteora, simRegister] = await Promise.all([
-        connection.simulateTransaction(signedMeteora),
-        connection.simulateTransaction(signedRegister),
-      ]);
-      if (simMeteora.value.err) {
-        const logs = (simMeteora.value.logs ?? []).slice(-4).join(" | ");
-        throw new Error(
-          `Meteora createPool simulation failed: ${JSON.stringify(simMeteora.value.err)} · ${logs}`,
-        );
-      }
-      if (simRegister.value.err) {
-        const logs = (simRegister.value.logs ?? []).slice(-4).join(" | ");
-        throw new Error(
-          `YAL register_token simulation failed: ${JSON.stringify(simRegister.value.err)} · ${logs}`,
-        );
-      }
-
-      // 5. Submit both through Helius Sender (Jito + staked connections).
+      // 4. Submit both through Helius Sender (Jito + staked connections).
+      //    No pre-flight simulation: the register_token tx depends on the
+      //    meme_mint that the Meteora createPool tx creates, so simulating
+      //    it against current state always fails with AccountNotInitialized.
+      //    On-chain confirmation below catches real errors with a tx sig.
       [sigMeteora, sigRegister] = await Promise.all([
         sendViaSender(signedMeteora.serialize()),
         sendViaSender(signedRegister.serialize()),
       ]);
 
-      // 6. Wait for both to confirm. If either errs on-chain, surface it
+      // 5. Wait for both to confirm. If either errs on-chain, surface it
       //    with the sig so users can paste into Solscan.
       const [confMeteora, confRegister] = await Promise.all([
         connection.confirmTransaction(sigMeteora, "confirmed"),
