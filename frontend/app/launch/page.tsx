@@ -150,11 +150,12 @@ export default function LaunchPage() {
 
     // 3. Append Jito tip + co-signer sigs + refresh blockhash right before
     //    user signing, then sign BOTH with a single wallet popup.
+    let sigMeteora = "";
+    let sigRegister = "";
     try {
       appendTip(built.meteoraTx, publicKey);
       appendTip(built.registerTx, publicKey);
-      // Fresh blockhash AFTER metadata upload, BEFORE partialSign/user sign
-      // — keeps the blockhash close to "now" when Sender receives the tx.
+      // Fresh blockhash AFTER metadata upload, BEFORE partialSign/user sign.
       await refreshBlockhash(connection, built);
       built.meteoraTx.partialSign(built.baseMint);
       built.registerTx.partialSign(built.treasuryAta);
@@ -164,19 +165,48 @@ export default function LaunchPage() {
         built.registerTx,
       ]);
 
-      // 4. Submit both through Helius Sender (dual-routes to Jito + staked
-      //    connections). register_token doesn't actually depend on the mint
-      //    existing yet, so parallel submission is safe.
-      const [sigMeteora, sigRegister] = await Promise.all([
+      // 4. Simulate locally BEFORE submitting — catches on-chain errors
+      //    while the tx hasn't been broadcast yet, so the user isn't charged
+      //    for a tx that's guaranteed to fail.
+      const [simMeteora, simRegister] = await Promise.all([
+        connection.simulateTransaction(signedMeteora),
+        connection.simulateTransaction(signedRegister),
+      ]);
+      if (simMeteora.value.err) {
+        const logs = (simMeteora.value.logs ?? []).slice(-4).join(" | ");
+        throw new Error(
+          `Meteora createPool simulation failed: ${JSON.stringify(simMeteora.value.err)} · ${logs}`,
+        );
+      }
+      if (simRegister.value.err) {
+        const logs = (simRegister.value.logs ?? []).slice(-4).join(" | ");
+        throw new Error(
+          `YAL register_token simulation failed: ${JSON.stringify(simRegister.value.err)} · ${logs}`,
+        );
+      }
+
+      // 5. Submit both through Helius Sender (Jito + staked connections).
+      [sigMeteora, sigRegister] = await Promise.all([
         sendViaSender(signedMeteora.serialize()),
         sendViaSender(signedRegister.serialize()),
       ]);
 
-      // 5. Wait for both to confirm.
-      await Promise.all([
+      // 6. Wait for both to confirm. If either errs on-chain, surface it
+      //    with the sig so users can paste into Solscan.
+      const [confMeteora, confRegister] = await Promise.all([
         connection.confirmTransaction(sigMeteora, "confirmed"),
         connection.confirmTransaction(sigRegister, "confirmed"),
       ]);
+      if (confMeteora.value.err) {
+        throw new Error(
+          `createPool errored on-chain: ${JSON.stringify(confMeteora.value.err)} (sig ${sigMeteora})`,
+        );
+      }
+      if (confRegister.value.err) {
+        throw new Error(
+          `register_token errored on-chain: ${JSON.stringify(confRegister.value.err)} (sig ${sigRegister})`,
+        );
+      }
 
       pushToast({
         title: "launched on-chain",
@@ -184,7 +214,13 @@ export default function LaunchPage() {
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "launch tx failed";
-      pushToast({ title: "launch failed", sub: msg, kind: "danger" });
+      // Log full error to console so the user can grab it from devtools.
+      console.error("launch failed:", err, { sigMeteora, sigRegister });
+      pushToast({
+        title: "launch failed",
+        sub: msg.slice(0, 280),
+        kind: "danger",
+      });
       setStep(0);
       return;
     }
