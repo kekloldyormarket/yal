@@ -27,15 +27,23 @@ import { registerTokenIx, yalTokenPda, TOKEN_2022_PROGRAM } from "./sdk";
 /** Graduation tiers — three pre-deployed Meteora DBC configs. */
 export type GraduationTier = 5 | 20 | 80;
 
-function configPubkey(envVar: string): PublicKey | null {
-  const v = process.env[envVar];
-  return v ? new PublicKey(v) : null;
+// Mainnet-deployed DBC configs (one per tier). Env vars override for devnet
+// / staging. Once these are set on chain they're effectively immutable
+// constants for the protocol — same status as YAL_PROGRAM_ID + STACSOL pool.
+const DEFAULT_CONFIGS: Record<GraduationTier, string> = {
+  5: "DFiDinu6UmzdYUWJf38C5acXgWoBMjP9junzkFFcSCU9",
+  20: "A7SdTVNsiC5Dmw2KMxcDBKSU9fv5gjCUcsXeJBHNPbu1",
+  80: "BWrQzmtbw5nrE4ratP5fJtV7HPiP48vbjWT8t7HgPqto",
+};
+
+function configPubkey(tier: GraduationTier, envVar: string): PublicKey {
+  return new PublicKey(process.env[envVar] || DEFAULT_CONFIGS[tier]);
 }
 
-export const YAL_DBC_CONFIGS: Record<GraduationTier, PublicKey | null> = {
-  5: configPubkey("NEXT_PUBLIC_YAL_DBC_CONFIG_5SOL"),
-  20: configPubkey("NEXT_PUBLIC_YAL_DBC_CONFIG_20SOL"),
-  80: configPubkey("NEXT_PUBLIC_YAL_DBC_CONFIG_80SOL"),
+export const YAL_DBC_CONFIGS: Record<GraduationTier, PublicKey> = {
+  5: configPubkey(5, "NEXT_PUBLIC_YAL_DBC_CONFIG_5SOL"),
+  20: configPubkey(20, "NEXT_PUBLIC_YAL_DBC_CONFIG_20SOL"),
+  80: configPubkey(80, "NEXT_PUBLIC_YAL_DBC_CONFIG_80SOL"),
 };
 
 export const TIER_LABELS: Record<GraduationTier, string> = {
@@ -75,11 +83,6 @@ export async function buildLaunchTx(
   input: LaunchInput,
 ): Promise<BuiltLaunchTx> {
   const dbcConfig = YAL_DBC_CONFIGS[input.tier];
-  if (!dbcConfig) {
-    throw new Error(
-      `Tier ${input.tier} SOL DBC config not deployed (NEXT_PUBLIC_YAL_DBC_CONFIG_${input.tier}SOL). Run scripts/deploy-dbc-configs.ts to seed all three tiers.`,
-    );
-  }
 
   const baseMint = Keypair.generate();
   const treasuryAta = Keypair.generate();
@@ -118,19 +121,15 @@ export async function buildLaunchTx(
   return { baseMint, treasuryAta, meteoraTx, registerTx, yalToken };
 }
 
-export function launchReadiness(tier: GraduationTier): {
+export function launchReadiness(_tier: GraduationTier): {
   ready: boolean;
   missing: string[];
 } {
-  const missing: string[] = [];
-  if (!YAL_DBC_CONFIGS[tier]) {
-    missing.push(
-      `NEXT_PUBLIC_YAL_DBC_CONFIG_${tier}SOL — ${tier} SOL tier DBC config not yet deployed`,
-    );
-  }
-  return { ready: missing.length === 0, missing };
+  // All three tiers are live on mainnet. Kept for parity in case devnet
+  // overrides ever surface gaps.
+  return { ready: true, missing: [] };
 }
 
 export function availableTiers(): GraduationTier[] {
-  return ([5, 20, 80] as const).filter((t) => YAL_DBC_CONFIGS[t] !== null);
+  return [5, 20, 80];
 }
