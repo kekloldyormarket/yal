@@ -298,7 +298,7 @@ function TokenRow({
       </td>
       <td className="r num accent">
         {t.status === "graduated" && floor > 0
-          ? floor.toExponential(3)
+          ? fmt.dec(floor, 4)
           : "—"}
       </td>
       <td className="r num muted">

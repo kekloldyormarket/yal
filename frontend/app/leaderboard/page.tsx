@@ -96,7 +96,7 @@ export default function LeaderboardPage() {
                   className="r num accent"
                   style={{ fontWeight: 700 }}
                 >
-                  {t.floor.toExponential(3)}
+                  {fmt.dec(t.floor, 4)}
                 </td>
                 <td className="r">
                   <div

@@ -426,7 +426,7 @@ function BuySellPanel({
   wallet,
 }: {
   token: UiToken;
-  wallet: { balance_sol: number } | null;
+  wallet: { balance_sol: number; holdings: Record<string, number> } | null;
 }) {
   const { connection, pushToast, refreshTokens } = useYal();
   const { publicKey, signTransaction } = useWallet();
@@ -438,6 +438,9 @@ function BuySellPanel({
   const price = priceAt(token.progress);
   const parsed = parseFloat(amt);
   const valid = amt !== "" && !isNaN(parsed) && parsed > 0;
+  // Sell percentage buttons need the user's meme balance. Buy percentage
+  // buttons are literal SOL amounts (0.1, 0.5, 1, 5) — no balance needed.
+  const memeBal = wallet?.holdings[token.mint] || 0;
   // Local approximation for the UI — actual fill comes from Meteora's
   // swapQuote at submit time.
   const expected = valid
@@ -541,12 +544,32 @@ function BuySellPanel({
                 key={v}
                 className="btn"
                 style={{ height: 26, padding: "0 8px", fontSize: 10, flex: 1 }}
-                onClick={() => setAmt(String(v))}
+                onClick={() => {
+                  if (tab === "buy") {
+                    setAmt(String(v));
+                  } else {
+                    // v is percent — apply to the user's meme balance.
+                    setAmt(String(Math.floor(memeBal * (v / 100))));
+                  }
+                }}
+                disabled={tab === "sell" && !wallet}
               >
                 {tab === "buy" ? v + " sol" : v + "%"}
               </button>
             ))}
           </div>
+          {tab === "sell" && wallet && (
+            <div
+              style={{
+                marginTop: 6,
+                fontSize: 10,
+                color: "var(--text-3)",
+                textAlign: "right",
+              }}
+            >
+              balance · {fmt.num(memeBal)} ${token.ticker}
+            </div>
+          )}
         </div>
 
         <div className="kv">
