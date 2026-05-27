@@ -43,7 +43,7 @@ function buildConfig(tier: typeof TIERS[number]) {
       tokenType: 1 as any,                   // Token2022
       tokenBaseDecimal: 6 as any,            // TokenDecimal.SIX
       tokenQuoteDecimal: 9 as any,           // TokenDecimal.NINE (SOL)
-      tokenUpdateAuthority: 1 as any,        // Immutable
+      tokenUpdateAuthority: 0 as any,        // CreatorUpdateAuthority — creator can update metadata
       totalTokenSupply: 1_000_000_000,
       leftover: 10_000,
     },

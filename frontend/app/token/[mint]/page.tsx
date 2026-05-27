@@ -9,6 +9,8 @@ import { Stat } from "@/components/Primitives";
 import { floorOf, priceAt, GRADUATION_THRESHOLD_SOL, STACSOL, YAL_PROGRAM_ID_STR } from "@/lib/yal-client";
 import { buildSwapTx } from "@/lib/swap-tx";
 import { appendTip, sendViaSender } from "@/lib/sender";
+import { useDbcPoolState } from "@/lib/dbc-state";
+import { buildMetadataUpdateTx } from "@/lib/metadata-update-tx";
 import { useYal } from "../../providers";
 import type { UiToken } from "@/lib/types";
 
@@ -89,6 +91,7 @@ export default function TokenPage({
           )}
           <div style={{ height: 16 }} />
           <TokenMetaPanel token={token} />
+          <CreatorReconfigurePanel token={token} />
         </div>
       </div>
     </div>
@@ -165,8 +168,23 @@ function TokenTop({ token }: { token: UiToken }) {
 }
 
 function BondingChartPanel({ token }: { token: UiToken }) {
-  const pts = useMemo(() => makeBondHistory(token), [token.mint, token.bonded_sol]);
-  const max = GRADUATION_THRESHOLD_SOL;
+  const { connection } = useYal();
+  const { state: dbc } = useDbcPoolState(connection, token.mint);
+
+  // Live values pulled straight from the Meteora pool. Fall back to the YAL
+  // token's stored bonded only when the DBC reader is still warming up.
+  const bondedSol = dbc?.bondedSol ?? token.bonded_sol;
+  const thresholdSol = dbc?.thresholdSol ?? GRADUATION_THRESHOLD_SOL;
+  const progress = dbc?.progress ?? token.progress;
+  const price = bondedSol > 0 && progress > 0 ? bondedSol / Math.max(1, progress * 1_000_000_000) : priceAt(progress);
+
+  const pts = useMemo(
+    () => makeBondHistory(bondedSol),
+    [token.mint, bondedSol],
+  );
+  // Chart axis ticks scale to the actual threshold for this tier.
+  const tickMax = thresholdSol;
+  const ticks = [0, tickMax * 0.25, tickMax * 0.5, tickMax * 0.75, tickMax];
   const W = 560,
     H = 240;
   const padL = 40,
@@ -174,7 +192,7 @@ function BondingChartPanel({ token }: { token: UiToken }) {
     padT = 12,
     padB = 28;
   const xs = (i: number) => padL + (i / (pts.length - 1)) * (W - padL - padR);
-  const ys = (v: number) => H - padB - (v / max) * (H - padT - padB);
+  const ys = (v: number) => H - padB - (v / tickMax) * (H - padT - padB);
   const path = pts.map((p, i) => (i === 0 ? "M" : "L") + xs(i) + " " + ys(p.v)).join(" ");
   const area =
     path +
@@ -187,8 +205,7 @@ function BondingChartPanel({ token }: { token: UiToken }) {
     " " +
     (H - padB) +
     " Z";
-  const gradY = ys(max);
-  const price = priceAt(token.progress);
+  const gradY = ys(tickMax);
 
   return (
     <div className="panel">
@@ -205,16 +222,20 @@ function BondingChartPanel({ token }: { token: UiToken }) {
         >
           <Stat
             k="bonded"
-            v={token.bonded_sol.toFixed(2) + " sol"}
-            sub={`/ ${GRADUATION_THRESHOLD_SOL} sol target`}
+            v={bondedSol.toFixed(3) + " sol"}
+            sub={`/ ${thresholdSol.toFixed(0)} sol target`}
             accent
           />
           <Stat
             k="progress"
-            v={(token.progress * 100).toFixed(1) + "%"}
+            v={(progress * 100).toFixed(1) + "%"}
             sub="to graduation"
           />
-          <Stat k="price · sol" v={price.toFixed(8)} sub="bond curve approx" />
+          <Stat
+            k="price · sol"
+            v={price.toExponential(3)}
+            sub="live from curve"
+          />
           <Stat
             k="age"
             v={token.created_at ? fmt.agoTs(token.created_at) : "—"}
@@ -225,7 +246,7 @@ function BondingChartPanel({ token }: { token: UiToken }) {
         <div className="progress" style={{ height: 12, marginBottom: 18 }}>
           <div
             className="progress-fill"
-            style={{ width: token.progress * 100 + "%" }}
+            style={{ width: progress * 100 + "%" }}
           />
         </div>
 
@@ -234,7 +255,7 @@ function BondingChartPanel({ token }: { token: UiToken }) {
           style={{ aspectRatio: W + "/" + H, marginBottom: 12 }}
         >
           <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-            {[0, 20, 40, 60, 80].map((v) => (
+            {ticks.map((v) => (
               <g key={v}>
                 <line
                   className="chart-grid"
@@ -249,7 +270,7 @@ function BondingChartPanel({ token }: { token: UiToken }) {
                   y={ys(v) + 3}
                   textAnchor="end"
                 >
-                  {v}
+                  {v < 1 ? v.toFixed(1) : v.toFixed(0)}
                 </text>
               </g>
             ))}
@@ -269,7 +290,7 @@ function BondingChartPanel({ token }: { token: UiToken }) {
               textAnchor="end"
               style={{ fill: "var(--accent)" }}
             >
-              GRADUATE @ {GRADUATION_THRESHOLD_SOL} SOL
+              GRADUATE @ {thresholdSol.toFixed(0)} SOL
             </text>
             <text className="chart-axis" x={padL} y={H - 10}>
               {token.created_at ? fmt.agoTs(token.created_at) + " ago" : "—"}
@@ -950,10 +971,10 @@ function AboutPanel() {
   );
 }
 
-function makeBondHistory(token: UiToken) {
+function makeBondHistory(bondedSol: number) {
   // Deterministic curve approximation purely from current bonded — no fake history.
   // The line shows the implied "accelerating-to-current" path, not real txns.
-  const total = token.bonded_sol || 0.01;
+  const total = bondedSol || 0.01;
   const n = 36;
   const points: { t: number; v: number }[] = [];
   for (let i = 0; i < n; i++) {
@@ -961,4 +982,182 @@ function makeBondHistory(token: UiToken) {
     points.push({ t, v: total * Math.pow(t, 1.6) });
   }
   return points;
+}
+
+// Creator-only panel. Shown when the connected wallet matches the
+// yal_token.authority. Lets the launcher re-upload metadata (name / symbol /
+// description / image) and flips the on-chain Token-2022 'uri' field to
+// point at the new JSON.
+function CreatorReconfigurePanel({ token }: { token: UiToken }) {
+  const { connection, pushToast } = useYal();
+  const { publicKey, signTransaction } = useWallet();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(token.name);
+  const [symbol, setSymbol] = useState(token.ticker);
+  const [description, setDescription] = useState(token.desc);
+  const [imgUrl, setImgUrl] = useState(token.img || "");
+  const [uploading, setUploading] = useState(false);
+  const [working, setWorking] = useState(false);
+
+  const isCreator =
+    !!publicKey && publicKey.toBase58() === token.authority;
+  if (!isCreator) return null;
+
+  async function handleImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      const r = await fetch("/api/upload-image", { method: "POST", body: fd });
+      const j = (await r.json()) as { url?: string; error?: string };
+      if (!r.ok || !j.url) throw new Error(j.error || "upload failed");
+      setImgUrl(j.url);
+    } catch (err: unknown) {
+      pushToast({
+        title: "image upload failed",
+        sub: err instanceof Error ? err.message : "",
+        kind: "danger",
+      });
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function submit() {
+    if (!publicKey || !signTransaction) return;
+    setWorking(true);
+    try {
+      const metaResp = await fetch("/api/upload-metadata", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          symbol: symbol.toUpperCase(),
+          description,
+          image: imgUrl,
+          external_url: "https://yal.fun",
+        }),
+      });
+      const j = (await metaResp.json()) as { url?: string; error?: string };
+      if (!metaResp.ok || !j.url) throw new Error(j.error || "metadata upload failed");
+
+      const tx = await buildMetadataUpdateTx({
+        conn: connection,
+        mint: new PublicKey(token.mint),
+        updateAuthority: publicKey,
+        newUri: j.url,
+      });
+      appendTip(tx, publicKey);
+      const signed = await signTransaction(tx);
+      const sig = await sendViaSender(signed.serialize());
+      await connection.confirmTransaction(sig, "confirmed");
+      pushToast({
+        title: "metadata updated",
+        sub: sig.slice(0, 8) + "…",
+      });
+      setOpen(false);
+    } catch (err: unknown) {
+      pushToast({
+        title: "update failed",
+        sub: err instanceof Error ? err.message.slice(0, 200) : "",
+        kind: "danger",
+      });
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return (
+    <>
+      <div style={{ height: 16 }} />
+      <div className="panel" style={{ borderColor: "var(--accent-dim)" }}>
+        <div
+          className="panel-h"
+          style={{ cursor: "pointer" }}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <span style={{ color: "var(--accent)", fontWeight: 700 }}>
+            creator · reconfigure
+          </span>
+          <span style={{ marginLeft: "auto", color: "var(--text-3)" }}>
+            {open ? "−" : "+"}
+          </span>
+        </div>
+        {open && (
+          <div className="panel-body">
+            <p className="muted" style={{ fontSize: 11, marginBottom: 14 }}>
+              You hold the update authority on this mint. Re-upload metadata
+              JSON to Vercel Blob and flip the on-chain URI — wallets and
+              explorers will fetch the new name / symbol / image immediately.
+            </p>
+
+            <div className="field">
+              <label className="label">name</label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={32}
+              />
+            </div>
+            <div className="field">
+              <label className="label">symbol</label>
+              <input
+                value={symbol}
+                onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+                maxLength={10}
+              />
+            </div>
+            <div className="field">
+              <label className="label">description</label>
+              <textarea
+                rows={3}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                maxLength={240}
+              />
+            </div>
+            <div className="field">
+              <label className="label">image</label>
+              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                <label className="btn" style={{ cursor: "pointer" }}>
+                  {uploading ? "uploading…" : "choose new"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImage}
+                    style={{ display: "none" }}
+                  />
+                </label>
+                {imgUrl && (
+                  <img
+                    src={imgUrl}
+                    alt=""
+                    style={{
+                      width: 48,
+                      height: 48,
+                      objectFit: "cover",
+                      border: "1px solid var(--border-2)",
+                    }}
+                  />
+                )}
+              </div>
+            </div>
+
+            <hr className="hr" />
+
+            <button
+              className="btn primary lg"
+              style={{ width: "100%" }}
+              onClick={submit}
+              disabled={working || uploading || !name || !symbol}
+            >
+              {working ? "signing…" : "update metadata · 1 tx"}
+            </button>
+          </div>
+        )}
+      </div>
+    </>
+  );
 }

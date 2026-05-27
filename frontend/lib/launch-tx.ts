@@ -28,12 +28,12 @@ import { registerTokenIx, yalTokenPda, TOKEN_2022_PROGRAM } from "./sdk";
 export type GraduationTier = 5 | 20 | 80;
 
 // Mainnet-deployed DBC configs (one per tier). Env vars override for devnet
-// / staging. Once these are set on chain they're effectively immutable
-// constants for the protocol — same status as YAL_PROGRAM_ID + STACSOL pool.
+// / staging. tokenUpdateAuthority = CreatorUpdateAuthority — launcher keeps
+// the ability to update metadata (name/symbol/uri) post-launch.
 const DEFAULT_CONFIGS: Record<GraduationTier, string> = {
-  5: "DFiDinu6UmzdYUWJf38C5acXgWoBMjP9junzkFFcSCU9",
-  20: "A7SdTVNsiC5Dmw2KMxcDBKSU9fv5gjCUcsXeJBHNPbu1",
-  80: "BWrQzmtbw5nrE4ratP5fJtV7HPiP48vbjWT8t7HgPqto",
+  5: "2ACJ5JGshXts1a4vjMef1Zcqwa4xXnhfP5do8uCCaVW8",
+  20: "FYPDras2wmaCqKEGVEcFoSpiHKPSAHtJbhoEG32mDPrR",
+  80: "8KQMrM3A7e4RP4GjYkWZYu9K6ki27XtiUP9nsb4fpG2R",
 };
 
 function configPubkey(tier: GraduationTier, envVar: string): PublicKey {

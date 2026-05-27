@@ -51,16 +51,19 @@ export default function HomePage() {
           long live <span className="accent">stacSOL.</span>
         </h1>
         <p className="sub">
-          Same DBC curve as pump.fun. Pick your graduation tier — <strong>5,
-          20, or 80 SOL bonded</strong>. Once it hits, a 24-hour countdown
-          starts. Within that window, at one random moment, the entire
-          bonded SOL gets minted into <strong>stacSOL</strong> — our
-          Token-2022 LST with a <strong>6.9% fee on every mint, burn, and
-          transfer, all flowing back to NAV</strong>. The AMM dies. The meme
-          dies. <strong>Everyone who held when the music stopped walks away
-          with a pro-rata stacSOL claim</strong>, burnable forever. Every
-          mint funds NAV. Every redemption funds NAV. NAV only goes up →
-          your slice only goes up. The marketing is the math.
+          <strong>Launch a throwaway meme.</strong> Same DBC curve as
+          pump.fun, three tiers — <strong>5, 20, or 80 SOL</strong> to bond.
+          Pick the one you&apos;re comfy with. Once it hits, a 24-hour
+          countdown starts; at one random moment inside that window{" "}
+          <strong>the AMM gets pulled, the meme dies, and every holder&apos;s
+          bag becomes a pro-rata claim on stacSOL</strong> — our Token-2022
+          LST that compounds NAV via a 6.9% fee on every mint, burn, and
+          transfer. After the music stops the only exit is burn → claim. No
+          more buying. No more selling. <strong>If you want long-term AMM
+          holds, you&apos;re in the wrong place.</strong> Bond too low and
+          you&apos;ll never get to play with the curve. Bond too high and you
+          might never graduate. Pick your tier. Pick your fate. The marketing
+          is the math.
         </p>
         <p className="sub" style={{ marginTop: 14, fontSize: 13 }}>
           if you&apos;re tired of gambling then{" "}
