@@ -88,7 +88,7 @@ export default function LaunchPage() {
   }
 
   function next() {
-    if (validate()) setStep(1);
+    if (validate()) void sign();
   }
 
   async function sign() {
@@ -237,14 +237,6 @@ export default function LaunchPage() {
               wallet={wallet}
             />
           )}
-          {step === 1 && (
-            <ReviewStep
-              form={form}
-              imgPreview={imgPreview}
-              back={() => setStep(0)}
-              sign={sign}
-            />
-          )}
           {step === 2 && <SigningStep />}
           {step === 3 && launched && (
             <DoneStep token={launched} onOpen={() => router.push("/token/" + launched.mint)} />
@@ -278,7 +270,7 @@ function FormStep({
   return (
     <div className="panel">
       <div className="panel-h">
-        new token <span className="badge">step 1 / 3</span>
+        new token <span className="badge">step 1 / 2</span>
       </div>
       <div className="panel-body">
         <div className="field">
@@ -415,105 +407,7 @@ function FormStep({
             DBC curve + register_token tx
           </div>
           <button className="btn primary lg" onClick={next} disabled={!wallet}>
-            {wallet ? "review →" : "connect wallet first"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ReviewStep({
-  form,
-  imgPreview,
-  back,
-  sign,
-}: {
-  form: LaunchForm;
-  imgPreview: string | null;
-  back: () => void;
-  sign: () => void;
-}) {
-  return (
-    <div className="panel">
-      <div className="panel-h">
-        review <span className="badge">step 2 / 3</span>
-      </div>
-      <div className="panel-body">
-        <div style={{ display: "flex", gap: 16, marginBottom: 18 }}>
-          {imgPreview ? (
-            <img
-              src={imgPreview}
-              alt="token preview"
-              style={{
-                width: 64,
-                height: 64,
-                objectFit: "cover",
-                border: "1px solid var(--border-2)",
-              }}
-            />
-          ) : (
-            <div className="avatar lg">{form.ticker.slice(0, 2)}</div>
-          )}
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>${form.ticker}</div>
-            <div className="muted">{form.name}</div>
-            <div style={{ marginTop: 6, fontSize: 12 }}>{form.description}</div>
-          </div>
-        </div>
-
-        <div className="kv">
-          <span className="k">total supply</span>
-          <span className="v num">1,000,000,000</span>
-        </div>
-        <div className="kv">
-          <span className="k">bonding curve</span>
-          <span className="v">Meteora DBC</span>
-        </div>
-        <div className="kv">
-          <span className="k">graduation target</span>
-          <span className="v accent">YAL router</span>
-        </div>
-        <div className="kv">
-          <span className="k">graduation threshold</span>
-          <span className="v num">
-            {form.tier.toFixed(2)} sol bonded · {TIER_LABELS[form.tier]} tier
-          </span>
-        </div>
-        <div className="kv">
-          <span className="k">post-grad backing</span>
-          <span className="v accent">stacSOL</span>
-        </div>
-        <div className="kv">
-          <span className="k">creator fee</span>
-          <span className="v num">0 sol</span>
-        </div>
-        <div className="kv">
-          <span className="k">tx fee</span>
-          <span className="v num">0.02 sol</span>
-        </div>
-
-        <hr className="hr" />
-
-        <div className="mono-block" style={{ marginBottom: 16 }}>
-          <span className="muted">// atomic transaction</span>
-          <br />
-          1. create SPL mint ({form.ticker})
-          <br />
-          2. init Meteora DBC pool
-          <br />
-          3. <span className="accent">register_token</span>(total_supply =
-          1_000_000_000)
-          <br />
-          4. seed initial reserves
-        </div>
-
-        <div style={{ display: "flex", gap: 12, justifyContent: "space-between" }}>
-          <button className="btn" onClick={back}>
-            ← back
-          </button>
-          <button className="btn primary lg" onClick={sign}>
-            sign + launch
+            {wallet ? "launch →" : "connect wallet first"}
           </button>
         </div>
       </div>
@@ -553,7 +447,7 @@ function DoneStep({ token, onOpen }: { token: UiToken; onOpen: () => void }) {
   return (
     <div className="panel">
       <div className="panel-h">
-        confirmed <span className="badge live">step 3 / 3</span>
+        confirmed <span className="badge live">step 2 / 2</span>
       </div>
       <div className="panel-body" style={{ textAlign: "center", padding: "32px 24px" }}>
         <pre
