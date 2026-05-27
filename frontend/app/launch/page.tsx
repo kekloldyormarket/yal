@@ -2,9 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { useYal } from "../providers";
 import type { UiToken } from "@/lib/types";
-import { TIER_LABELS, type GraduationTier } from "@/lib/launch-tx";
+import { TIER_LABELS, type GraduationTier, buildLaunchTx } from "@/lib/launch-tx";
 
 type LaunchForm = {
   name: string;
@@ -20,7 +21,8 @@ type LaunchForm = {
 const YAL_EXTERNAL_URL = "https://yal.fun";
 
 export default function LaunchPage() {
-  const { wallet, pushToast, registerPendingLaunch } = useYal();
+  const { wallet, pushToast, registerPendingLaunch, connection } = useYal();
+  const { publicKey, signTransaction } = useWallet();
   const router = useRouter();
   const [form, setForm] = useState<LaunchForm>({
     name: "",
@@ -90,30 +92,31 @@ export default function LaunchPage() {
   }
 
   async function sign() {
+    if (!publicKey || !signTransaction) {
+      pushToast({ title: "connect a wallet first", kind: "danger" });
+      return;
+    }
     setStep(2);
+
+    // 1. Upload Metaplex metadata JSON → public URL (goes on the mint).
     let metadataUri = "";
     try {
-      // Upload Metaplex-shape metadata JSON to Vercel Blob; URL goes into the
-      // mint's token metadata pointer (Token-2022) / on the DBC createPool
-      // call as the `uri` argument.
-      if (form.img && /^https?:\/\//.test(form.img)) {
-        const r = await fetch("/api/upload-metadata", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            name: form.name,
-            symbol: form.ticker.toUpperCase(),
-            description: form.description,
-            image: form.img,
-            external_url: YAL_EXTERNAL_URL,
-            twitter: form.twitter,
-            telegram: form.telegram,
-          }),
-        });
-        const j = (await r.json()) as { url?: string; error?: string };
-        if (!r.ok || !j.url) throw new Error(j.error || "metadata upload failed");
-        metadataUri = j.url;
-      }
+      const r = await fetch("/api/upload-metadata", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: form.name,
+          symbol: form.ticker.toUpperCase(),
+          description: form.description,
+          image: form.img || "",
+          external_url: YAL_EXTERNAL_URL,
+          twitter: form.twitter,
+          telegram: form.telegram,
+        }),
+      });
+      const j = (await r.json()) as { url?: string; error?: string };
+      if (!r.ok || !j.url) throw new Error(j.error || "metadata upload failed");
+      metadataUri = j.url;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "metadata upload failed";
       pushToast({ title: "metadata upload failed", sub: msg, kind: "danger" });
@@ -121,40 +124,92 @@ export default function LaunchPage() {
       return;
     }
 
-    // Mock on-chain launch — real flow will pass `metadataUri` into
-    // buildLaunchTx (lib/launch-tx.ts) once wallet adapter is wired.
-    setTimeout(() => {
-      const fakeMint = generateFakeMint(form.ticker + Date.now());
-      const t: UiToken = {
-        mint: fakeMint,
-        pubkey: fakeMint,
-        ticker: form.ticker.toUpperCase(),
+    // 2. Build the two on-chain txs (Meteora DBC createPool + YAL register_token).
+    let built;
+    try {
+      built = await buildLaunchTx(connection, {
         name: form.name,
-        desc: form.description,
-        img: form.img,
-        authority: wallet?.addr || "",
-        treasury_ata: generateFakeMint("ata" + fakeMint),
-        total_supply: 1_000_000_000,
-        circulating_supply: 1_000_000_000,
-        treasury_stacsol: 0,
-        treasury_sol_lamports: 0,
-        bonded_sol_lamports: 0,
-        bonded_sol: 0,
-        redeemed_meme: 0,
-        graduated_at: 0,
-        last_liquidation_ts: 0,
-        created_at: Math.floor(Date.now() / 1000),
-        status: "bonding",
-        progress: 0,
-      };
-      registerPendingLaunch(t);
-      pushToast({
-        title: "$" + t.ticker + " launched",
-        sub: metadataUri ? "metadata uploaded · curve live" : "curve live (no image)",
+        ticker: form.ticker.toUpperCase(),
+        description: form.description,
+        metadataUri,
+        tier: form.tier,
+        user: publicKey,
       });
-      setLaunched(t);
-      setStep(3);
-    }, 1800);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "tx build failed";
+      pushToast({ title: "couldn't build launch tx", sub: msg, kind: "danger" });
+      setStep(1);
+      return;
+    }
+
+    // 3. Sign + send Meteora createPool (baseMint is a co-signer).
+    try {
+      built.meteoraTx.partialSign(built.baseMint);
+      const signed = await signTransaction(built.meteoraTx);
+      const sig = await connection.sendRawTransaction(signed.serialize(), {
+        skipPreflight: false,
+        maxRetries: 5,
+      });
+      await connection.confirmTransaction(sig, "confirmed");
+      pushToast({ title: "DBC pool created", sub: sig.slice(0, 8) + "…" });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "DBC tx failed";
+      pushToast({ title: "DBC pool failed", sub: msg, kind: "danger" });
+      setStep(1);
+      return;
+    }
+
+    // 4. Sign + send YAL register_token (treasuryAta is a co-signer).
+    try {
+      built.registerTx.partialSign(built.treasuryAta);
+      const signed = await signTransaction(built.registerTx);
+      const sig = await connection.sendRawTransaction(signed.serialize(), {
+        skipPreflight: false,
+        maxRetries: 5,
+      });
+      await connection.confirmTransaction(sig, "confirmed");
+      pushToast({ title: "registered with YAL router", sub: sig.slice(0, 8) + "…" });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "register_token failed";
+      pushToast({
+        title: "register_token failed",
+        sub: msg + " (DBC pool exists — retry from token page)",
+        kind: "danger",
+      });
+      setStep(1);
+      return;
+    }
+
+    // 5. Optimistic insert so the user lands on /token/<mint> with state.
+    const t: UiToken = {
+      mint: built.baseMint.publicKey.toBase58(),
+      pubkey: built.yalToken.toBase58(),
+      ticker: form.ticker.toUpperCase(),
+      name: form.name,
+      desc: form.description,
+      img: form.img,
+      authority: publicKey.toBase58(),
+      treasury_ata: built.treasuryAta.publicKey.toBase58(),
+      total_supply: 1_000_000_000,
+      circulating_supply: 1_000_000_000,
+      treasury_stacsol: 0,
+      treasury_sol_lamports: 0,
+      bonded_sol_lamports: 0,
+      bonded_sol: 0,
+      redeemed_meme: 0,
+      graduated_at: 0,
+      last_liquidation_ts: 0,
+      created_at: Math.floor(Date.now() / 1000),
+      status: "bonding",
+      progress: 0,
+    };
+    registerPendingLaunch(t);
+    pushToast({
+      title: "$" + t.ticker + " launched",
+      sub: "bonding curve live · " + form.tier + " sol target",
+    });
+    setLaunched(t);
+    setStep(3);
   }
 
   return (
@@ -631,14 +686,3 @@ function FlyStep({
   );
 }
 
-function generateFakeMint(seed: string): string {
-  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789";
-  let s = 0;
-  for (let i = 0; i < seed.length; i++) s = (s * 31 + seed.charCodeAt(i)) >>> 0;
-  let out = "";
-  for (let i = 0; i < 44; i++) {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    out += chars[Math.floor(((s & 0x7fffffff) / 0x7fffffff) * chars.length)];
-  }
-  return out;
-}

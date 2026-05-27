@@ -1,38 +1,30 @@
-// Real launch flow — builds the on-chain transactions for "launch a meme on
-// YAL.fun". Currently NOT wired into the launch page (the page still uses a
-// 1.8s mock timer + localStorage). Wire this in once a wallet adapter is
-// available (signTransaction + sendTransaction).
+// Real launch flow — builds the on-chain transactions to launch a meme on
+// YAL.fun. Wired against the deployed YAL router + Meteora DBC SDK.
 //
-// The launch flow is two txns, in order:
-//
-//   1. Meteora DBC createPool against the shared YAL config
-//      → mints the bonding curve, base mint keypair signs
+// Two transactions, in order:
+//   1. Meteora DBC createPool against the tier's pre-deployed config
+//      → mints the bonding curve; base mint keypair signs
 //   2. YAL register_token against the router
-//      → creates the yal_token PDA + treasury ATA, signed by the user
+//      → creates the yal_token PDA + treasury ATA
 //
-// Prereq (one-time, NOT per-launch): a shared Meteora DBC config must exist
-// on-chain with:
+// Prereq (one-time, per tier): a Meteora DBC config exists on-chain with
 //   - quoteMint = SOL (or wSOL)
-//   - migrationQuoteThreshold = 80 SOL
-//   - feeClaimer / creator = YAL router-controlled pubkey
-//   - leftoverReceiver = YAL router-controlled pubkey
+//   - migrationQuoteThreshold = {5, 20, 80} SOL per tier
+//   - creator / feeClaimer / leftoverReceiver = YAL-controlled
+// The config pubkey for each tier goes into NEXT_PUBLIC_YAL_DBC_CONFIG_*.
 //
-// Pass the config pubkey via NEXT_PUBLIC_YAL_DBC_CONFIG.
+// See scripts/deploy-dbc-configs.ts for one-shot deployment of all three.
 
 import {
   Connection,
   Keypair,
   PublicKey,
   Transaction,
-  TransactionInstruction,
 } from "@solana/web3.js";
+import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { registerTokenIx, yalTokenPda, TOKEN_2022_PROGRAM } from "./sdk";
 
-/** Graduation tiers — three pre-deployed Meteora DBC configs, each with a
- *  different `migrationQuoteThreshold` (bonded SOL needed to graduate). Pick
- *  one per launch. Lower thresholds = easier graduation, faster stacSOL
- *  conversion, smaller final pool. Higher = more skin-in-the-game and a
- *  bigger stacSOL bag for holders. */
+/** Graduation tiers — three pre-deployed Meteora DBC configs. */
 export type GraduationTier = 5 | 20 | 80;
 
 function configPubkey(envVar: string): PublicKey | null {
@@ -59,71 +51,55 @@ export interface LaunchInput {
   name: string;
   ticker: string;
   description: string;
-  imageUri: string | null;
+  metadataUri: string;
   tier: GraduationTier;
   user: PublicKey;
 }
 
 export interface BuiltLaunchTx {
-  /** Generated base-mint keypair. Must co-sign all txns + be persisted by caller. */
+  /** Generated base-mint keypair. Must co-sign the Meteora tx + be persisted
+   *  so the caller can route the user to /token/<mint> on success. */
   baseMint: Keypair;
-  /** Generated treasury-ATA keypair. Must co-sign register_token tx. */
+  /** Generated treasury-ATA keypair. Must co-sign the register_token tx. */
   treasuryAta: Keypair;
-  /** Step 1: createPool — needs Meteora SDK to fill ix list. Currently empty. */
+  /** Step 1: Meteora DBC createPool. Co-signer: baseMint. */
   meteoraTx: Transaction;
-  /** Step 2: register_token. Ready to sign. */
+  /** Step 2: YAL register_token. Co-signer: treasuryAta. */
   registerTx: Transaction;
-  /** Convenience: derived yal_token PDA so the caller can route the user to
-   *  /token/<mint> on success. */
+  /** Derived yal_token PDA. */
   yalToken: PublicKey;
 }
 
-/**
- * Build the two-tx launch flow. The Meteora createPool tx is a placeholder
- * until `@meteora-ag/dynamic-bonding-curve-sdk` is added to the frontend
- * bundle — keeping the module side-effect-free for now so the frontend
- * doesn't pull the SDK into its bundle unless launch is attempted.
- *
- * The register_token tx is fully wired and works against the deployed YAL
- * router today — useful for testing the YAL half without DBC.
- */
 export async function buildLaunchTx(
   conn: Connection,
   input: LaunchInput,
 ): Promise<BuiltLaunchTx> {
+  const dbcConfig = YAL_DBC_CONFIGS[input.tier];
+  if (!dbcConfig) {
+    throw new Error(
+      `Tier ${input.tier} SOL DBC config not deployed (NEXT_PUBLIC_YAL_DBC_CONFIG_${input.tier}SOL). Run scripts/deploy-dbc-configs.ts to seed all three tiers.`,
+    );
+  }
+
   const baseMint = Keypair.generate();
   const treasuryAta = Keypair.generate();
   const [yalToken] = yalTokenPda(baseMint.publicKey);
 
-  const dbcConfig = YAL_DBC_CONFIGS[input.tier];
-  if (!dbcConfig) {
-    throw new Error(
-      `Tier ${input.tier} SOL DBC config not deployed (NEXT_PUBLIC_YAL_DBC_CONFIG_${input.tier}SOL).`,
-    );
-  }
+  // Step 1: Meteora DBC createPool — uses the tier's pre-deployed config.
+  // baseMint must sign this tx (it's a new mint authority being established).
+  const dbc = new DynamicBondingCurveClient(conn, "confirmed");
+  const meteoraTx = await dbc.pool.createPool({
+    baseMint: baseMint.publicKey,
+    config: dbcConfig,
+    name: input.name,
+    symbol: input.ticker,
+    uri: input.metadataUri,
+    payer: input.user,
+    poolCreator: input.user,
+  });
 
-  // Step 1: Meteora DBC createPool against the tier's pre-deployed config.
-  const meteoraTx = new Transaction();
-  // TODO when @meteora-ag/dynamic-bonding-curve-sdk lands in the frontend:
-  //
-  //   import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
-  //   const dbc = new DynamicBondingCurveClient(conn, "confirmed");
-  //   const createPoolTx = await dbc.pool.createPool({
-  //     baseMint: baseMint.publicKey,
-  //     config: dbcConfig,              // ← tier picker resolves which config
-  //     name: input.name,
-  //     symbol: input.ticker,
-  //     uri: input.imageUri ?? "",
-  //     payer: input.user,
-  //     poolCreator: input.user,
-  //   });
-  //   meteoraTx.add(...createPoolTx.instructions);
-  //
-  // Until then this tx is empty — callers that need a full launch can detect
-  // the empty ix list and skip submission.
-
-  // Step 2: YAL register_token — fully wired.
-  const registerIx: TransactionInstruction = registerTokenIx({
+  // Step 2: register_token on the YAL router.
+  const ix = registerTokenIx({
     yalToken,
     memeMint: baseMint.publicKey,
     treasuryAta: treasuryAta.publicKey,
@@ -131,7 +107,7 @@ export async function buildLaunchTx(
     stacsolTokenProgram: TOKEN_2022_PROGRAM,
     totalSupply: FIXED_TOTAL_SUPPLY_RAW,
   });
-  const registerTx = new Transaction().add(registerIx);
+  const registerTx = new Transaction().add(ix);
 
   const { blockhash } = await conn.getLatestBlockhash("confirmed");
   meteoraTx.recentBlockhash = blockhash;
@@ -142,8 +118,6 @@ export async function buildLaunchTx(
   return { baseMint, treasuryAta, meteoraTx, registerTx, yalToken };
 }
 
-/** Convenience: report which prerequisites a real launch is currently
- *  missing. The launch page can use this to guide the user. */
 export function launchReadiness(tier: GraduationTier): {
   ready: boolean;
   missing: string[];
@@ -154,7 +128,6 @@ export function launchReadiness(tier: GraduationTier): {
       `NEXT_PUBLIC_YAL_DBC_CONFIG_${tier}SOL — ${tier} SOL tier DBC config not yet deployed`,
     );
   }
-  missing.push("@meteora-ag/dynamic-bonding-curve-sdk integration in frontend bundle");
   return { ready: missing.length === 0, missing };
 }
 
