@@ -24,12 +24,34 @@ export function Stat({
 
 export function TokenAvatar({
   ticker,
+  img,
   size = "",
 }: {
   ticker: string;
+  img?: string | null;
   size?: "" | "lg" | "xl";
 }) {
   const cls = "avatar" + (size ? " " + size : "");
+  const px = size === "xl" ? 80 : size === "lg" ? 56 : 22;
+  if (img) {
+    return (
+      <span
+        className={cls}
+        style={{
+          backgroundImage: `url(${img})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          width: px,
+          height: px,
+          color: "transparent",
+          textIndent: -9999,
+        }}
+        aria-label={ticker}
+      >
+        {(ticker || "?").slice(0, 2)}
+      </span>
+    );
+  }
   return <span className={cls}>{(ticker || "?").slice(0, 2)}</span>;
 }
 

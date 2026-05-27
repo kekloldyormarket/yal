@@ -236,7 +236,7 @@ function TokenRow({
       <td className="muted">{idx}</td>
       <td>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <TokenAvatar ticker={t.ticker} />
+          <TokenAvatar ticker={t.ticker} img={t.img} />
           <div>
             <div style={{ fontWeight: 600 }}>${t.ticker}</div>
             <div className="muted" style={{ fontSize: 10 }}>
