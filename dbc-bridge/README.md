@@ -1,43 +1,85 @@
 # yal-dbc-bridge
 
-Monitors Meteora DBC pools where YAL is configured as the migrator. On
-graduation transition, claims the resulting DAMM v2 LP position on behalf
-of the matching `yal_token` PDA so the daily liquidator can later withdraw,
-swap the SOL side, and call `deposit_to_stacsol`.
+Daemon that watches Meteora DBC pools whose base mint is a registered YAL
+token. When a pool's `quoteReserve >= migrationQuoteThreshold` (the
+"80 SOL bonded" line), the daemon calls Meteora's `migrateToDammV2` so the
+post-bond LP becomes a DAMM v2 position owned by the YAL-controlled
+addresses configured at launch.
+
+The daily liquidator picks up SOL accumulated in the matching `yal_token`
+treasury and pushes it through `deposit_to_stacsol`.
+
+## Architecture
+
+Real on-chain reads via `@meteora-ag/dynamic-bonding-curve-sdk@^1.5.3`:
+
+- `getPoolByBaseMint(memeMint)` — finds the DBC pool for a YAL base mint
+- `getPoolConfig(config)` — reads `migrationQuoteThreshold` + fee opts
+- `pool.account.quoteReserve` / `isMigrated` — graduation state
+- `migration.migrateToDammV2({...})` — flips the curve to DAMM v2
+
+```
+┌─ DBC pool (Meteora) ────────────────────────────────┐
+│  baseMint: $YOURMEME                                │
+│  config: {                                          │
+│    creator:          YAL-controlled                 │
+│    feeClaimer:       YAL-controlled                 │
+│    leftoverReceiver: YAL-controlled                 │
+│    migrationQuoteThreshold: 80 SOL                  │
+│  }                                                  │
+│  quoteReserve: $$$ (grows as buyers ape)            │
+│  isMigrated: 0                                      │
+└────────────────────────┬────────────────────────────┘
+                         │  daemon detects: reserve ≥ threshold
+                         ▼
+                  migrateToDammV2
+                         │
+                         ▼
+┌─ DAMM v2 LP (Meteora) ──────────────────────────────┐
+│  Owned by config.creator / feeClaimer (YAL)         │
+│  Trading fees accumulate in pool                    │
+└─────────────────────────────────────────────────────┘
+                         │
+                         ▼
+                  Daily 24h sweep:
+                  · claim DAMM v2 trading fees
+                  · transfer SOL → yal_token via fund_treasury
+                  · liquidator drains → deposit_to_stacsol
+                         │
+                         ▼
+                  Treasury_stacsol grows
+                  Floor ratchets up
+                  Holders can redeem any time
+```
 
 ## Status
 
-**Scaffolded, not yet wired against the Meteora SDK.** Two TODO sites:
+The migrate-trigger half is wired. The post-migration claim half is open
+on one design call:
 
-1. `checkDbcGraduation` — needs `@meteora-ag/dynamic-bonding-curve` to
-   decode pool state and detect the bonding → migrated transition
-2. `claimMigrationForYal` — needs a new `claim_dbc_migration` instruction
-   on the YAL router that accepts the LP position transfer and updates
-   `yal_token.graduated_at` + `bonded_sol_lamports`
+**Option A — new YAL router `mark_graduated` ix.** Permissionless. Reads
+the DBC pool state, sets `yal_token.graduated_at = now` and
+`bonded_sol_lamports`. Clean — no admin step.
 
-The shell loop, RPC plumbing, account fetching, and YAL state decoding are
-correct and tested against the deployed program. What's blocked is the
-specific decode/claim logic — those need the Meteora program layout
-verified before coding.
+**Option B — admin tx + claim-fees daemon.** This daemon also calls
+`claimCreatorTradingFee` on a schedule and transfers proceeds via the
+existing `fund_treasury` ix. `graduated_at` set by a one-time admin tx.
 
-## Open architectural questions
+Both work. Option A is preferred.
 
-1. **Does Meteora DBC's migrator hook expose bonded SOL atomically?** If
-   yes: we can pull SOL + LP in one tx. If no: we accept the position
-   first and unwind it later in the liquidator's daily sweep.
-2. **Migrator authority model.** DBC config takes a Pubkey for the
-   migrator — does that need to be a program ID, or can it be a YAL
-   router PDA? PDA gives us atomic CPI; program ID forces an off-chain
-   relay step (this daemon).
-3. **What happens to leftover meme tokens** in the DBC vault at
-   graduation? Likely some unbonded supply stays with the LP. The
-   liquidator should sell those into the AMM during the daily sweep.
-
-## Run
+## Deploy
 
 ```bash
-bun install
-RPC_URL=http://127.0.0.1:8899 bun run src/index.ts
+cd dbc-bridge && bun install
+# keypair must match the DBC config's creator / feeClaimer
+bun run src/index.ts
+# or systemd alongside the liquidator on the validator box
 ```
 
-Same systemd-on-validator-box deploy pattern as `liquidator/`.
+## Tunables
+
+| env | default | meaning |
+|---|---|---|
+| `RPC_URL` | Ironforge mainnet | RPC endpoint |
+| `YAL_BRIDGE_KEYPAIR` | `~/.config/solana/id.json` | tx signer (must match DBC config's creator/partner) |
+| `YAL_PROGRAM_ID` | `9zMMi7n…` | YAL router program |

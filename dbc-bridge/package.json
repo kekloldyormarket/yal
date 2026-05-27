@@ -1,13 +1,18 @@
 {
   "name": "yal-dbc-bridge",
   "version": "0.1.0",
-  "description": "Watch Meteora DBC pools where YAL is the migrator; claim graduated LP into the matching yal_token treasury",
+  "description": "Watch Meteora DBC pools whose base mint is a registered YAL token; trigger migration to DAMM v2 once bonded — feeds the daily liquidator",
   "type": "module",
   "scripts": {
     "start": "bun run src/index.ts",
     "once": "bun run src/index.ts --once"
   },
   "dependencies": {
+    "@meteora-ag/dynamic-bonding-curve-sdk": "^1.5.3",
     "@solana/web3.js": "^1.98.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
   }
 }
