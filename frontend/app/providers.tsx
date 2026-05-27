@@ -8,14 +8,26 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Connection } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
+import {
+  ConnectionProvider,
+  WalletProvider,
+  useWallet,
+} from "@solana/wallet-adapter-react";
+import { UnifiedWalletProvider } from "@jup-ag/wallet-adapter";
 import {
   RPC,
   fetchNav,
   listTokens,
   systemStats,
 } from "@/lib/yal-client";
-import type { MockWallet, SystemStats, Toast, UiToken } from "@/lib/types";
+import type { SystemStats, Toast, UiToken } from "@/lib/types";
+
+interface ConnectedWallet {
+  addr: string;
+  balance_sol: number;
+  holdings: Record<string, number>;
+}
 
 interface YalContextValue {
   tokens: UiToken[];
@@ -24,13 +36,18 @@ interface YalContextValue {
   nav: number;
   navLastFetched: number;
   stats: SystemStats;
-  wallet: MockWallet | null;
-  connect: () => void;
-  disconnect: () => void;
+  /** UI-shape wallet snapshot — derived from the real wallet adapter. null
+   *  while disconnected; the address + balance + holdings are auto-refreshed
+   *  whenever the user connects/changes wallet. */
+  wallet: ConnectedWallet | null;
   toasts: Toast[];
   pushToast: (t: Omit<Toast, "id">) => void;
-  // Local-only mutation hooks for mock flows (no on-chain submit yet).
-  applyLocalRedeem: (mint: string, memeAmount: number) => { stacsol_received: number; sol_received: number } | null;
+  /** Local optimistic updates after the real on-chain tx confirms. Keeps the
+   *  UI snappy between RPC refreshes. */
+  applyLocalRedeem: (
+    mint: string,
+    memeAmount: number,
+  ) => { stacsol_received: number; sol_received: number } | null;
   applyLocalBuy: (mint: string, solAmount: number, expectedMeme: number) => void;
   applyLocalSell: (mint: string, memeAmount: number, expectedSol: number) => void;
   registerPendingLaunch: (token: UiToken) => void;
@@ -39,28 +56,42 @@ interface YalContextValue {
 
 const YalContext = createContext<YalContextValue | null>(null);
 
-const FAKE_WALLET_KEY = "yal.wallet.v1";
 const NAV_FALLBACK = 1.0387;
 
-function fakeAddr(seed: string): string {
-  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456789";
-  let s = 0;
-  for (let i = 0; i < seed.length; i++) s = (s * 31 + seed.charCodeAt(i)) >>> 0;
-  let out = "";
-  for (let i = 0; i < 44; i++) {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    out += chars[Math.floor(((s & 0x7fffffff) / 0x7fffffff) * chars.length)];
-  }
-  return out;
+export function Providers({ children }: { children: React.ReactNode }) {
+  return (
+    <ConnectionProvider endpoint={RPC}>
+      <WalletProvider wallets={[]} autoConnect>
+        <UnifiedWalletProvider
+          wallets={[]}
+          config={{
+            autoConnect: true,
+            env: "mainnet-beta",
+            metadata: {
+              name: "YAL.fun",
+              description: "permissionless meme → stake-bag conversion",
+              url: "https://yal.fun",
+              iconUrls: [],
+            },
+            theme: "dark",
+          }}
+        >
+          <YalInnerProvider>{children}</YalInnerProvider>
+        </UnifiedWalletProvider>
+      </WalletProvider>
+    </ConnectionProvider>
+  );
 }
 
-export function Providers({ children }: { children: React.ReactNode }) {
+function YalInnerProvider({ children }: { children: React.ReactNode }) {
   const connection = useMemo(() => new Connection(RPC, "confirmed"), []);
+  const { publicKey } = useWallet();
+
   const [tokens, setTokens] = useState<UiToken[]>([]);
   const [tokenLoading, setTokenLoading] = useState(true);
   const [nav, setNav] = useState<number>(NAV_FALLBACK);
   const [navLastFetched, setNavLastFetched] = useState<number>(0);
-  const [wallet, setWallet] = useState<MockWallet | null>(null);
+  const [wallet, setWallet] = useState<ConnectedWallet | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const refreshTokens = useCallback(async () => {
@@ -74,7 +105,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
     }
   }, [connection]);
 
-  // initial token + nav fetch
   useEffect(() => {
     void refreshTokens();
     fetchNav(connection)
@@ -85,7 +115,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
       .catch((e) => console.error("fetchNav failed:", e));
   }, [connection, refreshTokens]);
 
-  // periodic NAV refresh (every 30s)
   useEffect(() => {
     const id = setInterval(() => {
       fetchNav(connection)
@@ -98,7 +127,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
     return () => clearInterval(id);
   }, [connection]);
 
-  // periodic token refresh (every 45s)
   useEffect(() => {
     const id = setInterval(() => {
       void refreshTokens();
@@ -106,13 +134,44 @@ export function Providers({ children }: { children: React.ReactNode }) {
     return () => clearInterval(id);
   }, [refreshTokens]);
 
-  // restore mock wallet from localStorage on mount (only)
+  // Sync the UI-shape wallet snapshot with the real wallet adapter.
+  // When the user connects, fetch SOL balance + meme-token holdings for every
+  // YAL-registered mint they hold.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(FAKE_WALLET_KEY);
-      if (raw) setWallet(JSON.parse(raw));
-    } catch {}
-  }, []);
+    if (!publicKey) {
+      setWallet(null);
+      return;
+    }
+    let cancelled = false;
+    async function refresh(owner: PublicKey) {
+      try {
+        const [lamports, parsed] = await Promise.all([
+          connection.getBalance(owner),
+          connection.getParsedTokenAccountsByOwner(owner, {
+            programId: new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
+          }),
+        ]);
+        if (cancelled) return;
+        const holdings: Record<string, number> = {};
+        for (const { account } of parsed.value) {
+          const info = account.data.parsed?.info;
+          if (!info) continue;
+          const mint = info.mint as string;
+          const amount = Number(info.tokenAmount?.uiAmount ?? 0);
+          if (amount > 0) holdings[mint] = amount;
+        }
+        setWallet({ addr: owner.toBase58(), balance_sol: lamports / 1e9, holdings });
+      } catch (e) {
+        console.error("wallet refresh failed:", e);
+      }
+    }
+    void refresh(publicKey);
+    const id = setInterval(() => void refresh(publicKey), 20_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [publicKey, connection]);
 
   const pushToast = useCallback((t: Omit<Toast, "id">) => {
     const id = Math.random().toString(36).slice(2);
@@ -122,25 +181,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
       3800,
     );
   }, []);
-
-  const connect = useCallback(() => {
-    // Mock connect — real wallet adapter wiring is a follow-up.
-    const addr = fakeAddr("user-" + Date.now());
-    const w: MockWallet = { addr, balance_sol: 4.231, holdings: {} };
-    setWallet(w);
-    try {
-      localStorage.setItem(FAKE_WALLET_KEY, JSON.stringify(w));
-    } catch {}
-    pushToast({ title: "wallet connected", sub: addr.slice(0, 6) + "…" + addr.slice(-6) });
-  }, [pushToast]);
-
-  const disconnect = useCallback(() => {
-    setWallet(null);
-    try {
-      localStorage.removeItem(FAKE_WALLET_KEY);
-    } catch {}
-    pushToast({ title: "disconnected" });
-  }, [pushToast]);
 
   const applyLocalRedeem = useCallback(
     (mint: string, memeAmount: number) => {
@@ -163,17 +203,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
         ),
       );
       if (wallet) {
-        const next = {
-          ...wallet,
-          holdings: {
-            ...wallet.holdings,
-            [mint]: Math.max(0, (wallet.holdings[mint] || 0) - memeAmount),
-          },
-        };
-        setWallet(next);
-        try {
-          localStorage.setItem(FAKE_WALLET_KEY, JSON.stringify(next));
-        } catch {}
+        setWallet((w) =>
+          w
+            ? {
+                ...w,
+                holdings: {
+                  ...w.holdings,
+                  [mint]: Math.max(0, (w.holdings[mint] || 0) - memeAmount),
+                },
+              }
+            : w,
+        );
       }
       return { stacsol_received, sol_received };
     },
@@ -182,44 +222,41 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   const applyLocalBuy = useCallback(
     (mint: string, solAmount: number, expectedMeme: number) => {
-      if (!wallet) return;
-      const next: MockWallet = {
-        ...wallet,
-        balance_sol: Math.max(0, wallet.balance_sol - solAmount),
-        holdings: {
-          ...wallet.holdings,
-          [mint]: (wallet.holdings[mint] || 0) + expectedMeme,
-        },
-      };
-      setWallet(next);
-      try {
-        localStorage.setItem(FAKE_WALLET_KEY, JSON.stringify(next));
-      } catch {}
+      setWallet((w) =>
+        w
+          ? {
+              ...w,
+              balance_sol: Math.max(0, w.balance_sol - solAmount),
+              holdings: {
+                ...w.holdings,
+                [mint]: (w.holdings[mint] || 0) + expectedMeme,
+              },
+            }
+          : w,
+      );
     },
-    [wallet],
+    [],
   );
 
   const applyLocalSell = useCallback(
     (mint: string, memeAmount: number, expectedSol: number) => {
-      if (!wallet) return;
-      const next: MockWallet = {
-        ...wallet,
-        balance_sol: wallet.balance_sol + expectedSol,
-        holdings: {
-          ...wallet.holdings,
-          [mint]: Math.max(0, (wallet.holdings[mint] || 0) - memeAmount),
-        },
-      };
-      setWallet(next);
-      try {
-        localStorage.setItem(FAKE_WALLET_KEY, JSON.stringify(next));
-      } catch {}
+      setWallet((w) =>
+        w
+          ? {
+              ...w,
+              balance_sol: w.balance_sol + expectedSol,
+              holdings: {
+                ...w.holdings,
+                [mint]: Math.max(0, (w.holdings[mint] || 0) - memeAmount),
+              },
+            }
+          : w,
+      );
     },
-    [wallet],
+    [],
   );
 
   const registerPendingLaunch = useCallback((token: UiToken) => {
-    // Optimistic insert at top of list; real launch flow will overwrite on next refresh.
     setTokens((prev) => [token, ...prev.filter((p) => p.mint !== token.mint)]);
   }, []);
 
@@ -233,8 +270,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
     navLastFetched,
     stats,
     wallet,
-    connect,
-    disconnect,
     toasts,
     pushToast,
     applyLocalRedeem,

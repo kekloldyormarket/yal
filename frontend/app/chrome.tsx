@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { UnifiedWalletButton } from "@jup-ag/wallet-adapter";
 import { fmt } from "@/lib/format";
 import { useYal } from "./providers";
 import { YAL_PROGRAM_ID_STR } from "@/lib/yal-client";
@@ -32,7 +33,7 @@ export function Chrome({ children }: { children: React.ReactNode }) {
 
 function Header() {
   const pathname = usePathname();
-  const { wallet, connect, disconnect } = useYal();
+  const { wallet } = useYal();
   const [navOpen, setNavOpen] = useState(false);
   const links: { to: string; label: string }[] = [
     { to: "/", label: "tokens" },
@@ -68,29 +69,21 @@ function Header() {
                 {l.label}
               </Link>
             ))}
-            {wallet ? (
-              <a
-                className="nav-link"
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault();
-                  disconnect();
-                }}
-              >
+            {wallet && (
+              <span className="nav-link" style={{ pointerEvents: "none" }}>
                 {fmt.short(wallet.addr, 4, 4)} · {wallet.balance_sol.toFixed(3)} sol
-              </a>
-            ) : (
-              <a
-                className="nav-link"
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault();
-                  connect();
-                }}
-              >
-                connect
-              </a>
+              </span>
             )}
+            <span
+              className="nav-link"
+              style={{ padding: 0, display: "flex", alignItems: "center" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <UnifiedWalletButton
+                buttonClassName="yal-wallet-button"
+                overrideContent={wallet ? "disconnect" : "connect"}
+              />
+            </span>
             <Link href="/launch" className="nav-link cta">
               + launch
             </Link>

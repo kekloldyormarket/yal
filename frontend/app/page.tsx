@@ -46,12 +46,18 @@ export default function HomePage() {
         <h1>
           launch a meme.
           <br />
-          graduate into <span className="accent">stacked SOL.</span>
+          feed the <span className="accent">stacSOL flywheel.</span>
         </h1>
         <p className="sub">
-          every graduated meme on YAL routes its bonded SOL into{" "}
-          <strong>stacSOL</strong>, a single-validator LST with 100% commission.
-          burn your meme to claim your share. the marketing is the math.
+          every meme that graduates on YAL routes its bonded SOL into{" "}
+          <strong>stacSOL</strong> — a single-validator LST we run on patched
+          agave with native vote batching, <strong>100% commission, every
+          lamport of yield compounds into NAV forever.</strong> Your launch is
+          an inflation tap into the LST: more memes bond → more SOL staked →
+          NAV doubles faster → every $YOURMEME&apos;s redemption floor ratchets
+          up on its own. Holders burn their meme to claim a pro-rata slice of
+          stacSOL backing. Supply only shrinks. Treasury only grows. The
+          marketing is the math.
         </p>
       </div>
 
