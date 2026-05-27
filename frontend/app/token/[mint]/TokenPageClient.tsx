@@ -1,12 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { use, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { fmt } from "@/lib/format";
 import { Stat } from "@/components/Primitives";
-import { floorOf, priceAt, GRADUATION_THRESHOLD_SOL, STACSOL, YAL_PROGRAM_ID_STR } from "@/lib/yal-client";
+import { floorOf, priceAt, GRADUATION_THRESHOLD_SOL, STACSOL, YAL_PROGRAM_ID_STR, toUiToken } from "@/lib/yal-client";
+import { fetchYalTokenByMint } from "@/lib/sdk";
+import { getTokenMetadata } from "@solana/spl-token";
+import { TOKEN_2022_PROGRAM } from "@/lib/sdk";
 import { buildSwapTx } from "@/lib/swap-tx";
 import { appendTip, sendViaSender } from "@/lib/sender";
 import { useDbcPoolState } from "@/lib/dbc-state";
@@ -20,11 +23,67 @@ export default function TokenPageClient({
   params: Promise<{ mint: string }>;
 }) {
   const { mint } = use(params);
-  const { tokens, tokenLoading, wallet, nav, pushToast, applyLocalRedeem } = useYal();
-  const token = tokens.find((t) => t.mint === mint);
+  const { tokens, tokenLoading, wallet, nav, pushToast, applyLocalRedeem, connection } = useYal();
+  // First check the loaded list (fast path for tokens we've already seen).
+  // Fall back to a direct PDA fetch for tokens not yet in the list — handles
+  // freshly-launched mints + deep links from outside the home page.
+  const cached = tokens.find((t) => t.mint === mint);
+  const [direct, setDirect] = useState<UiToken | null>(null);
+  const [directLoading, setDirectLoading] = useState(true);
+
+  useEffect(() => {
+    if (cached) {
+      setDirect(cached);
+      setDirectLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const mintPk = new PublicKey(mint);
+        const onchain = await fetchYalTokenByMint(connection, mintPk);
+        if (cancelled) return;
+        if (!onchain) {
+          setDirect(null);
+          setDirectLoading(false);
+          return;
+        }
+        // Best-effort metadata fetch (Token-2022 + JSON URI).
+        let meta: { name?: string; ticker?: string; desc?: string; img?: string } = {};
+        try {
+          const tokenMeta = await getTokenMetadata(connection, mintPk, "confirmed", TOKEN_2022_PROGRAM);
+          if (tokenMeta) {
+            meta.name = tokenMeta.name;
+            meta.ticker = tokenMeta.symbol;
+            if (tokenMeta.uri && /^https?:\/\//.test(tokenMeta.uri)) {
+              try {
+                const r = await fetch(tokenMeta.uri);
+                if (r.ok) {
+                  const j = (await r.json()) as { description?: string; image?: string };
+                  meta.desc = j.description;
+                  meta.img = j.image;
+                }
+              } catch {}
+            }
+          }
+        } catch {}
+        if (cancelled) return;
+        setDirect(toUiToken(onchain, meta));
+      } catch (e) {
+        console.error("token direct fetch failed:", e);
+      } finally {
+        if (!cancelled) setDirectLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mint, cached, connection]);
+
+  const token = cached || direct;
 
   if (!token) {
-    if (tokenLoading) {
+    if (directLoading || tokenLoading) {
       return (
         <div className="container">
           <div className="panel" style={{ padding: 48, textAlign: "center" }}>
