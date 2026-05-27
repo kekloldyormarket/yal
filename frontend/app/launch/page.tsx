@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useYal } from "../providers";
 import type { UiToken } from "@/lib/types";
+import { TIER_LABELS, type GraduationTier } from "@/lib/launch-tx";
 
 type LaunchForm = {
   name: string;
@@ -13,6 +14,7 @@ type LaunchForm = {
   twitter: string;
   telegram: string;
   website: string;
+  tier: GraduationTier;
 };
 
 export default function LaunchPage() {
@@ -26,6 +28,7 @@ export default function LaunchPage() {
     twitter: "",
     telegram: "",
     website: "",
+    tier: 80, // default to the pump.fun-comparable threshold
   });
   const [step, setStep] = useState<0 | 1 | 2 | 3>(0);
   const [errors, setErrors] = useState<Partial<Record<keyof LaunchForm, string>>>({});
@@ -252,6 +255,27 @@ function FormStep({
         </div>
 
         <div className="field">
+          <label className="label">graduation tier — bonded SOL to graduate</label>
+          <div className="btn-group">
+            {([5, 20, 80] as GraduationTier[]).map((t) => (
+              <button
+                key={t}
+                type="button"
+                className={"btn " + (form.tier === t ? "active" : "")}
+                style={{ flex: 1 }}
+                onClick={() => setField("tier", t)}
+              >
+                {t} sol · {TIER_LABELS[t]}
+              </button>
+            ))}
+          </div>
+          <div className="hint">
+            lower tier = easier graduation, smaller final stacSOL bag · higher
+            tier = more skin in the game, bigger payout
+          </div>
+        </div>
+
+        <div className="field">
           <label className="label">description · 240 max</label>
           <textarea
             rows={3}
@@ -400,7 +424,9 @@ function ReviewStep({
         </div>
         <div className="kv">
           <span className="k">graduation threshold</span>
-          <span className="v num">80.00 sol bonded</span>
+          <span className="v num">
+            {form.tier.toFixed(2)} sol bonded · {TIER_LABELS[form.tier]} tier
+          </span>
         </div>
         <div className="kv">
           <span className="k">post-grad backing</span>

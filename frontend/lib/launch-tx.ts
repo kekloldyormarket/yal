@@ -28,9 +28,29 @@ import {
 } from "@solana/web3.js";
 import { registerTokenIx, yalTokenPda, TOKEN_2022_PROGRAM } from "./sdk";
 
-export const YAL_DBC_CONFIG = process.env.NEXT_PUBLIC_YAL_DBC_CONFIG
-  ? new PublicKey(process.env.NEXT_PUBLIC_YAL_DBC_CONFIG)
-  : null;
+/** Graduation tiers — three pre-deployed Meteora DBC configs, each with a
+ *  different `migrationQuoteThreshold` (bonded SOL needed to graduate). Pick
+ *  one per launch. Lower thresholds = easier graduation, faster stacSOL
+ *  conversion, smaller final pool. Higher = more skin-in-the-game and a
+ *  bigger stacSOL bag for holders. */
+export type GraduationTier = 5 | 20 | 80;
+
+function configPubkey(envVar: string): PublicKey | null {
+  const v = process.env[envVar];
+  return v ? new PublicKey(v) : null;
+}
+
+export const YAL_DBC_CONFIGS: Record<GraduationTier, PublicKey | null> = {
+  5: configPubkey("NEXT_PUBLIC_YAL_DBC_CONFIG_5SOL"),
+  20: configPubkey("NEXT_PUBLIC_YAL_DBC_CONFIG_20SOL"),
+  80: configPubkey("NEXT_PUBLIC_YAL_DBC_CONFIG_80SOL"),
+};
+
+export const TIER_LABELS: Record<GraduationTier, string> = {
+  5: "lite",
+  20: "mid",
+  80: "full",
+};
 
 export const FIXED_TOTAL_SUPPLY_RAW = 1_000_000_000n * 1_000_000n; // 1B × 1e6 decimals
 export const FIXED_DECIMALS = 6;
@@ -40,6 +60,7 @@ export interface LaunchInput {
   ticker: string;
   description: string;
   imageUri: string | null;
+  tier: GraduationTier;
   user: PublicKey;
 }
 
@@ -74,7 +95,14 @@ export async function buildLaunchTx(
   const treasuryAta = Keypair.generate();
   const [yalToken] = yalTokenPda(baseMint.publicKey);
 
-  // Step 1: Meteora DBC createPool — placeholder, see TODO below.
+  const dbcConfig = YAL_DBC_CONFIGS[input.tier];
+  if (!dbcConfig) {
+    throw new Error(
+      `Tier ${input.tier} SOL DBC config not deployed (NEXT_PUBLIC_YAL_DBC_CONFIG_${input.tier}SOL).`,
+    );
+  }
+
+  // Step 1: Meteora DBC createPool against the tier's pre-deployed config.
   const meteoraTx = new Transaction();
   // TODO when @meteora-ag/dynamic-bonding-curve-sdk lands in the frontend:
   //
@@ -82,12 +110,12 @@ export async function buildLaunchTx(
   //   const dbc = new DynamicBondingCurveClient(conn, "confirmed");
   //   const createPoolTx = await dbc.pool.createPool({
   //     baseMint: baseMint.publicKey,
-  //     config: YAL_DBC_CONFIG!,
+  //     config: dbcConfig,              // ← tier picker resolves which config
   //     name: input.name,
   //     symbol: input.ticker,
   //     uri: input.imageUri ?? "",
   //     payer: input.user,
-  //     poolCreator: input.user,   // OR a YAL-controlled PDA
+  //     poolCreator: input.user,
   //   });
   //   meteoraTx.add(...createPoolTx.instructions);
   //
@@ -116,17 +144,20 @@ export async function buildLaunchTx(
 
 /** Convenience: report which prerequisites a real launch is currently
  *  missing. The launch page can use this to guide the user. */
-export function launchReadiness(): {
+export function launchReadiness(tier: GraduationTier): {
   ready: boolean;
   missing: string[];
 } {
   const missing: string[] = [];
-  if (!YAL_DBC_CONFIG) {
+  if (!YAL_DBC_CONFIGS[tier]) {
     missing.push(
-      "NEXT_PUBLIC_YAL_DBC_CONFIG — shared Meteora DBC config not yet deployed",
+      `NEXT_PUBLIC_YAL_DBC_CONFIG_${tier}SOL — ${tier} SOL tier DBC config not yet deployed`,
     );
   }
-  // Meteora SDK isn't bundled yet — flagged so the page can show "preview only"
   missing.push("@meteora-ag/dynamic-bonding-curve-sdk integration in frontend bundle");
   return { ready: missing.length === 0, missing };
+}
+
+export function availableTiers(): GraduationTier[] {
+  return ([5, 20, 80] as const).filter((t) => YAL_DBC_CONFIGS[t] !== null);
 }

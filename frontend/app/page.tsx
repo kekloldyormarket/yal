@@ -51,10 +51,11 @@ export default function HomePage() {
           long live <span className="accent">stacSOL.</span>
         </h1>
         <p className="sub">
-          Same DBC curve as pump.fun. At 80 SOL bonded, your meme graduates
-          and a 24-hour countdown starts. Within that window, at one random
-          moment, the entire bonded SOL flips into <strong>stacSOL</strong> —
-          our 100%-commission single-validator LST on patched agave. The AMM
+          Same DBC curve as pump.fun. Pick your graduation tier — <strong>5,
+          20, or 80 SOL bonded</strong>. Once it hits, a 24-hour countdown
+          starts. Within that window, at one random moment, the entire
+          bonded SOL flips into <strong>stacSOL</strong> — our
+          100%-commission single-validator LST on patched agave. The AMM
           dies. The meme dies. <strong>Everyone who held when the music
           stopped walks away with a pro-rata stacSOL claim</strong>, burnable
           forever. NAV compounds on autopilot from validator yield → your
