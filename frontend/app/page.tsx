@@ -62,6 +62,19 @@ export default function HomePage() {
           mint funds NAV. Every redemption funds NAV. NAV only goes up →
           your slice only goes up. The marketing is the math.
         </p>
+        <p className="sub" style={{ marginTop: 14, fontSize: 13 }}>
+          if you&apos;re tired of gambling then{" "}
+          <a
+            className="accent"
+            href="https://stacsol.app"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: "underline", textUnderlineOffset: 3 }}
+          >
+            stacsol.app
+          </a>
+          .
+        </p>
       </div>
 
       <div className="grid-4" style={{ marginBottom: 18 }}>
