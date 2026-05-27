@@ -53,7 +53,7 @@ if (ARG) {
 } else {
   // List all.
   const accounts = await conn.getProgramAccounts(PROGRAM_ID, {
-    filters: [{ dataSize: 153 }],
+    filters: [{ dataSize: 161 }],
   });
   console.log(`${accounts.length} YAL tokens registered`);
   console.log(`${"meme_mint".padEnd(46)} ${"circ".padStart(15)} ${"stacSOL".padStart(12)} ${"SOL".padStart(10)} status`);

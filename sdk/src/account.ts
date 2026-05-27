@@ -17,7 +17,7 @@ export interface YalToken {
   bump: number;
 }
 
-const YAL_TOKEN_SIZE = 153;
+const YAL_TOKEN_SIZE = 161;
 
 export function decodeYalToken(pubkey: PublicKey, data: Buffer): YalToken {
   let off = 8; // discriminator

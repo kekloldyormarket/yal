@@ -51,10 +51,10 @@ interface YalToken {
   bondedSolLamports: bigint;
 }
 
-// 153-byte yal_token PDA layout — kept in sync with programs/yal/src/lib.rs.
+// 161-byte yal_token PDA layout — kept in sync with programs/yal/src/lib.rs.
 async function fetchAllYalTokens(conn: Connection): Promise<YalToken[]> {
   const accounts = await conn.getProgramAccounts(YAL_PROGRAM, {
-    filters: [{ dataSize: 153 }],
+    filters: [{ dataSize: 161 }],
   });
   return accounts.map(({ pubkey, account }) => {
     const d = account.data;
