@@ -1,0 +1,14 @@
+{
+  "name": "yal-liquidator",
+  "version": "0.1.0",
+  "description": "YAL daily liquidator daemon — random-jitter 24h deposit_to_stacsol",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "once": "bun run src/index.ts --once"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.31.1",
+    "@solana/web3.js": "^1.98.0"
+  }
+}

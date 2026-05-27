@@ -1,0 +1,16 @@
+{
+  "name": "yal-cli",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "register": "bun run src/register.ts",
+    "fund": "bun run src/fund.ts",
+    "deposit": "bun run src/deposit.ts",
+    "redeem": "bun run src/redeem.ts",
+    "status": "bun run src/status.ts"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.98.0",
+    "@solana/spl-token": "^0.4.0"
+  }
+}
