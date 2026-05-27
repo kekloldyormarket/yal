@@ -36,14 +36,18 @@ interface PoolView {
   configAddress?: string;
 }
 
-/** Convert on-chain YalToken bigint fields to plain numbers + derive status/progress. */
+/** Convert on-chain YalToken bigint fields to plain numbers + derive status/progress.
+ *  All supply fields are normalized to UI units (raw / 1e6) so downstream
+ *  consumers can do display + share math without unit-mismatch bugs. */
 export function toUiToken(
   t: YalToken,
   meta?: { name?: string; ticker?: string; desc?: string; img?: string },
   pool?: PoolView,
 ): UiToken {
-  const totalSupply = Number(t.totalSupply);
-  const circulatingSupply = Number(t.circulatingSupply);
+  // Meme tokens are 6-decimal — convert raw u64 supply to UI count.
+  const MEME_DECIMALS = 1_000_000;
+  const totalSupply = Number(t.totalSupply) / MEME_DECIMALS;
+  const circulatingSupply = Number(t.circulatingSupply) / MEME_DECIMALS;
   const treasuryStacsol = Number(t.treasuryStacsol) / 1e9;
   const treasurySolLamports = Number(t.treasurySolLamports);
   // Prefer the live Meteora pool's quoteReserve over YAL's stored value —

@@ -12,14 +12,15 @@ export interface UiToken {
   authority: string;
   treasury_ata: string;
 
-  // u64 fields decoded into number form (small enough — supply is 1B, SOL <100k)
+  // Supply fields are UI units (raw u64 / 1e6) — 1B token reads as 1_000_000_000.
+  // Lets every consumer do display + share math without re-scaling.
   total_supply: number;
   circulating_supply: number;
   treasury_stacsol: number;        // u64 stacSOL lamports → divided by 1e9
   treasury_sol_lamports: number;   // raw lamports
   bonded_sol_lamports: number;     // raw lamports
   bonded_sol: number;              // SOL-scaled
-  redeemed_meme: number;           // total_supply - circulating_supply
+  redeemed_meme: number;           // total_supply - circulating_supply (UI units)
 
   graduated_at: number;            // unix seconds, 0 if not graduated
   last_liquidation_ts: number;

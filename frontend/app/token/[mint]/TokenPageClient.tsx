@@ -723,13 +723,9 @@ function RedeemPanel({
 
   const userBal = wallet?.holdings[token.mint] || 0;
   const parsedAmt = parseFloat(amt) || 0;
-  // YAL memes are 6 decimals — convert stored raw circulating supply to UI
-  // units so the share math works against the UI-unit input.
-  const MEME_DECIMALS = 1_000_000;
-  const circulatingUi = token.circulating_supply / MEME_DECIMALS;
   const stacsol_received =
-    circulatingUi > 0
-      ? (parsedAmt / circulatingUi) * effectiveTreasury
+    token.circulating_supply > 0
+      ? (parsedAmt / token.circulating_supply) * effectiveTreasury
       : 0;
   const sol_received = stacsol_received * nav;
   const effective_floor = parsedAmt > 0 ? sol_received / parsedAmt : 0;
@@ -822,8 +818,8 @@ function RedeemPanel({
             <div className="kv">
               <span className="k">share of supply</span>
               <span className="v num">
-                {circulatingUi > 0
-                  ? fmt.pct(parsedAmt / circulatingUi, 4)
+                {token.circulating_supply > 0
+                  ? fmt.pct(parsedAmt / token.circulating_supply, 4)
                   : "—"}
               </span>
             </div>
