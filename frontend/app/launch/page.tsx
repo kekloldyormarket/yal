@@ -13,9 +13,11 @@ type LaunchForm = {
   img: string | null;
   twitter: string;
   telegram: string;
-  website: string;
   tier: GraduationTier;
 };
+
+// Every YAL-launched meme's homepage is yal.fun — no per-meme website field.
+const YAL_EXTERNAL_URL = "https://yal.fun";
 
 export default function LaunchPage() {
   const { wallet, pushToast, registerPendingLaunch } = useYal();
@@ -27,7 +29,6 @@ export default function LaunchPage() {
     img: null,
     twitter: "",
     telegram: "",
-    website: "",
     tier: 80, // default to the pump.fun-comparable threshold
   });
   const [step, setStep] = useState<0 | 1 | 2 | 3>(0);
@@ -104,7 +105,7 @@ export default function LaunchPage() {
             symbol: form.ticker.toUpperCase(),
             description: form.description,
             image: form.img,
-            external_url: form.website,
+            external_url: YAL_EXTERNAL_URL,
             twitter: form.twitter,
             telegram: form.telegram,
           }),
@@ -320,7 +321,7 @@ function FormStep({
           </div>
         </div>
 
-        <div className="grid-3" style={{ gap: 12 }}>
+        <div className="grid-2" style={{ gap: 12 }}>
           <div className="field">
             <label className="label">twitter (opt)</label>
             <input
@@ -337,14 +338,10 @@ function FormStep({
               placeholder="t.me/…"
             />
           </div>
-          <div className="field">
-            <label className="label">website (opt)</label>
-            <input
-              value={form.website}
-              onChange={(e) => setField("website", e.target.value)}
-              placeholder="https://…"
-            />
-          </div>
+        </div>
+        <div className="hint" style={{ marginTop: -8, marginBottom: 12 }}>
+          website is always <span className="accent">yal.fun</span> — every
+          launch lives here.
         </div>
 
         <hr className="hr" />
