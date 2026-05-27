@@ -230,7 +230,7 @@ function FormStep({
           <input
             value={form.name}
             onChange={(e) => setField("name", e.target.value)}
-            placeholder="e.g. Premium Jeet"
+            placeholder="e.g. Moonbox"
             maxLength={32}
           />
           {errors.name && <div className="err">{errors.name}</div>}
@@ -242,7 +242,7 @@ function FormStep({
             <input
               value={form.ticker}
               onChange={(e) => setField("ticker", e.target.value.toUpperCase())}
-              placeholder="JEET"
+              placeholder="MOON"
               maxLength={10}
             />
             {errors.ticker && <div className="err">{errors.ticker}</div>}
