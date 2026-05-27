@@ -801,17 +801,43 @@ function RedeemPanel({
 
             <hr className="hr" />
 
+            {token.treasury_stacsol <= 0 && (
+              <div
+                style={{
+                  border: "1px solid var(--danger)",
+                  background: "rgba(255,59,59,0.06)",
+                  padding: "10px 14px",
+                  marginBottom: 14,
+                  fontSize: 11,
+                  color: "var(--danger)",
+                  lineHeight: 1.6,
+                }}
+              >
+                <strong>treasury is empty.</strong> the LP from migration
+                hasn&apos;t been drained into stacSOL yet — redeeming now would
+                burn your meme for 0 stacSOL. wait for the bridge daemon to
+                fund the treasury.
+              </div>
+            )}
+
             <button
               className="btn primary xl"
               style={{ width: "100%" }}
-              disabled={!wallet || !parsedAmt || parsedAmt > userBal}
+              disabled={
+                !wallet ||
+                !parsedAmt ||
+                parsedAmt > userBal ||
+                token.treasury_stacsol <= 0
+              }
               onClick={review}
             >
               {!wallet
                 ? "connect wallet"
-                : !parsedAmt
-                  ? "enter amount"
-                  : "review redemption →"}
+                : token.treasury_stacsol <= 0
+                  ? "treasury empty — wait for drain"
+                  : !parsedAmt
+                    ? "enter amount"
+                    : "review redemption →"}
             </button>
             <p className="muted" style={{ fontSize: 10, marginTop: 10, lineHeight: 1.5 }}>
               your meme bonded {token.bonded_sol.toFixed(2)} sol, which became{" "}

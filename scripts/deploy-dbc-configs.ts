@@ -75,14 +75,14 @@ function buildConfig(tier: typeof TIERS[number]) {
       },
     },
     liquidityDistribution: {
-      // Meteora requires ≥10% LP locked at day 1. We lock the minimum on
-      // partner side so the daily sweep can still drain ~90% of post-bond
-      // LP. The 10% permanent-locked stake stays as a dust pool forever
-      // per meme (acceptable cost — partner side = YAL operator).
-      partnerPermanentLockedLiquidityPercentage: 10,
-      partnerLiquidityPercentage: 40,
-      creatorPermanentLockedLiquidityPercentage: 0,
-      creatorLiquidityPercentage: 50,
+      // 90% partner liquid (daemon drains everything on the partner side).
+      // 10% locked permanently on creator side to satisfy Meteora's day-1
+      // ≥10% locked rule. That 10% becomes dust LP per meme that stays in
+      // DAMM v2 forever — acceptable cost.
+      partnerPermanentLockedLiquidityPercentage: 0,
+      partnerLiquidityPercentage: 90,
+      creatorPermanentLockedLiquidityPercentage: 10,
+      creatorLiquidityPercentage: 0,
     },
     lockedVesting: {
       totalLockedVestingAmount: 0,
