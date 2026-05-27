@@ -30,6 +30,7 @@ export default function LaunchPage() {
   const [step, setStep] = useState<0 | 1 | 2 | 3>(0);
   const [errors, setErrors] = useState<Partial<Record<keyof LaunchForm, string>>>({});
   const [imgPreview, setImgPreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [launched, setLaunched] = useState<UiToken | null>(null);
 
   function setField<K extends keyof LaunchForm>(k: K, v: LaunchForm[K]) {
@@ -50,25 +51,74 @@ export default function LaunchPage() {
     return Object.keys(e).length === 0;
   }
 
-  function handleImage(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleImage(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
+
+    // Local preview immediately — don't make the user wait for the upload to
+    // see their image in the review step.
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      const src = ev.target?.result as string;
-      setImgPreview(src);
-      setField("img", src);
-    };
+    reader.onload = (ev) => setImgPreview(ev.target?.result as string);
     reader.readAsDataURL(f);
+
+    // Kick off upload to Vercel Blob in the background. The resulting URL is
+    // what gets baked into the on-chain metadata JSON later, so it MUST be a
+    // real http(s) URL — not a data: URL.
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      const r = await fetch("/api/upload-image", { method: "POST", body: fd });
+      const j = (await r.json()) as { url?: string; error?: string };
+      if (!r.ok || !j.url) throw new Error(j.error || "upload failed");
+      setField("img", j.url);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "image upload failed";
+      pushToast({ title: "image upload failed", sub: msg, kind: "danger" });
+      setImgPreview(null);
+    } finally {
+      setUploading(false);
+    }
   }
 
   function next() {
     if (validate()) setStep(1);
   }
 
-  function sign() {
+  async function sign() {
     setStep(2);
-    // Mock launch — real flow will create mint + Meteora DBC pool + register_token.
+    let metadataUri = "";
+    try {
+      // Upload Metaplex-shape metadata JSON to Vercel Blob; URL goes into the
+      // mint's token metadata pointer (Token-2022) / on the DBC createPool
+      // call as the `uri` argument.
+      if (form.img && /^https?:\/\//.test(form.img)) {
+        const r = await fetch("/api/upload-metadata", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name: form.name,
+            symbol: form.ticker.toUpperCase(),
+            description: form.description,
+            image: form.img,
+            external_url: form.website,
+            twitter: form.twitter,
+            telegram: form.telegram,
+          }),
+        });
+        const j = (await r.json()) as { url?: string; error?: string };
+        if (!r.ok || !j.url) throw new Error(j.error || "metadata upload failed");
+        metadataUri = j.url;
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "metadata upload failed";
+      pushToast({ title: "metadata upload failed", sub: msg, kind: "danger" });
+      setStep(1);
+      return;
+    }
+
+    // Mock on-chain launch — real flow will pass `metadataUri` into
+    // buildLaunchTx (lib/launch-tx.ts) once wallet adapter is wired.
     setTimeout(() => {
       const fakeMint = generateFakeMint(form.ticker + Date.now());
       const t: UiToken = {
@@ -94,7 +144,10 @@ export default function LaunchPage() {
         progress: 0,
       };
       registerPendingLaunch(t);
-      pushToast({ title: "$" + t.ticker + " launched", sub: "bonding curve live" });
+      pushToast({
+        title: "$" + t.ticker + " launched",
+        sub: metadataUri ? "metadata uploaded · curve live" : "curve live (no image)",
+      });
       setLaunched(t);
       setStep(3);
     }, 1800);
