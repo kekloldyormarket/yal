@@ -1,5 +1,6 @@
 import { Connection, PublicKey } from "@solana/web3.js";
-import { fetchAllYalTokens, type YalToken, STACSOL, YAL_PROGRAM_ID } from "./sdk";
+import { getTokenMetadata } from "@solana/spl-token";
+import { fetchAllYalTokens, type YalToken, STACSOL, YAL_PROGRAM_ID, TOKEN_2022_PROGRAM } from "./sdk";
 import type { UiToken } from "./types";
 
 export const RPC =
@@ -70,10 +71,60 @@ export function toUiToken(t: YalToken, meta?: { name?: string; ticker?: string; 
   };
 }
 
-/** Fetch all YAL tokens from mainnet and convert to UI shape. */
+// Per-session metadata cache keyed by mint. Avoids refetching name/symbol/uri
+// + the JSON body on every refresh cycle.
+const META_CACHE = new Map<string, { name?: string; ticker?: string; desc?: string; img?: string }>();
+
+async function fetchMintMeta(
+  conn: Connection,
+  mint: PublicKey,
+): Promise<{ name?: string; ticker?: string; desc?: string; img?: string }> {
+  const key = mint.toBase58();
+  const cached = META_CACHE.get(key);
+  if (cached) return cached;
+  const meta: { name?: string; ticker?: string; desc?: string; img?: string } = {};
+  try {
+    // Token-2022 metadata extension (embedded in mint account).
+    const tokenMeta = await getTokenMetadata(conn, mint, "confirmed", TOKEN_2022_PROGRAM);
+    if (tokenMeta) {
+      meta.name = tokenMeta.name;
+      meta.ticker = tokenMeta.symbol;
+      // Follow the URI to the Vercel-Blob Metaplex JSON for description + image.
+      if (tokenMeta.uri && /^https?:\/\//.test(tokenMeta.uri)) {
+        try {
+          const r = await fetch(tokenMeta.uri);
+          if (r.ok) {
+            const j = (await r.json()) as { description?: string; image?: string };
+            meta.desc = j.description;
+            meta.img = j.image;
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+  META_CACHE.set(key, meta);
+  return meta;
+}
+
+/** Invalidate the metadata cache for a specific mint (e.g. after a creator
+ *  re-uploads metadata via the reconfigure flow). */
+export function invalidateMintMeta(mint: string): void {
+  META_CACHE.delete(mint);
+}
+
+/** Fetch all YAL tokens from mainnet and convert to UI shape — enriches each
+ *  token with its Token-2022 metadata + the JSON description/image so the
+ *  listing survives across redeploys. */
 export async function listTokens(conn: Connection): Promise<UiToken[]> {
   const onchain = await fetchAllYalTokens(conn);
-  return onchain.map((t) => toUiToken(t));
+  // Parallel enrich — single getTokenMetadata + at most one fetch() per mint.
+  const enriched = await Promise.all(
+    onchain.map(async (t) => {
+      const meta = await fetchMintMeta(conn, t.memeMint);
+      return toUiToken(t, meta);
+    }),
+  );
+  return enriched;
 }
 
 export function floorOf(t: UiToken, nav: number): number {
