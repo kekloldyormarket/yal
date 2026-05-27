@@ -358,6 +358,22 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 .tbl td { font-size: 12px; }
 .tbl tr.row-link { cursor: pointer; }
 .tbl tr.row-link:hover td { background: var(--bg-2); }
+
+/* Bump animation — fires when a row's bonded SOL or rank changes between
+   refreshes. Brief horizontal shake + accent backdrop fading back to
+   transparent, draws the eye without being obnoxious. */
+@keyframes row-bump {
+  0%   { background: var(--accent); transform: translateX(0); }
+  10%  { transform: translateX(-3px); }
+  25%  { transform: translateX(3px); }
+  40%  { transform: translateX(-2px); }
+  55%  { transform: translateX(2px); }
+  70%  { background: var(--accent-faint); transform: translateX(0); }
+  100% { background: transparent; transform: translateX(0); }
+}
+.tbl tr.row-bump td {
+  animation: row-bump 1.4s ease-out;
+}
 .tbl td.r, .tbl th.r { text-align: right; }
 .tbl td.c, .tbl th.c { text-align: center; }
 

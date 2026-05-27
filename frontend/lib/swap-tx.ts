@@ -24,6 +24,46 @@ export interface BuiltSwap {
   poolAddress: PublicKey;
 }
 
+/** Curve-aware quote for a swap. No tx built — call this for live UI estimates
+ *  so the "you receive" line matches what Meteora will actually fill (a flat
+ *  amountIn × spotPrice is wildly wrong when amountIn is a meaningful chunk
+ *  of the pool). */
+export async function getSwapQuote(args: BuildSwapArgs): Promise<{
+  expectedOut: bigint;
+  minOut: bigint;
+}> {
+  const dbc = new DynamicBondingCurveClient(args.conn, "confirmed");
+  const poolState = await dbc.state.getPoolByBaseMint(args.memeMint);
+  if (!poolState) throw new Error("no DBC pool for this mint yet");
+  const poolConfig = await dbc.state.getPoolConfig(poolState.account.config);
+  if (!poolConfig) throw new Error("pool config missing");
+
+  let currentPoint: BN;
+  if (poolConfig.activationType === 0) {
+    currentPoint = new BN(await args.conn.getSlot());
+  } else {
+    const slot = await args.conn.getSlot();
+    const blockTime = await args.conn.getBlockTime(slot);
+    if (blockTime === null) throw new Error("getBlockTime returned null");
+    currentPoint = new BN(blockTime);
+  }
+
+  const quote = await dbc.pool.swapQuote({
+    virtualPool: poolState.account,
+    config: poolConfig,
+    swapBaseForQuote: args.swapBaseForQuote,
+    amountIn: new BN(args.amountIn.toString()),
+    hasReferral: false,
+    currentPoint,
+    eligibleForFirstSwapWithMinFee: false,
+  });
+
+  const slipBps = BigInt(args.slippageBps ?? 200);
+  const expectedOut = BigInt(quote.outputAmount.toString());
+  const minOut = (expectedOut * (10_000n - slipBps)) / 10_000n;
+  return { expectedOut, minOut };
+}
+
 export async function buildSwapTx(args: BuildSwapArgs): Promise<BuiltSwap> {
   const dbc = new DynamicBondingCurveClient(args.conn, "confirmed");
   const poolState = await dbc.state.getPoolByBaseMint(args.memeMint);

@@ -155,23 +155,76 @@ async function fetchPoolView(
   }
 }
 
+/** Batch-fetch live stacSOL balances for a set of treasury ATAs in one
+ *  RPC call. Returns ui-unit values keyed by ATA pubkey. Falls back to 0
+ *  for accounts that don't yet exist on chain. */
+async function fetchLiveTreasuryBalances(
+  conn: Connection,
+  atas: PublicKey[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (atas.length === 0) return out;
+  // getMultipleAccountsInfo caps at 100 keys per call.
+  const chunks: PublicKey[][] = [];
+  for (let i = 0; i < atas.length; i += 100) chunks.push(atas.slice(i, i + 100));
+  const all = (await Promise.all(chunks.map((c) => conn.getMultipleAccountsInfo(c)))).flat();
+  all.forEach((acct, i) => {
+    if (!acct) {
+      out.set(atas[i]!.toBase58(), 0);
+      return;
+    }
+    // SPL Token / Token-2022 account: u64 amount at offset 64 (LE).
+    if (acct.data.length < 72) {
+      out.set(atas[i]!.toBase58(), 0);
+      return;
+    }
+    const dv = new DataView(
+      acct.data.buffer,
+      acct.data.byteOffset,
+      acct.data.byteLength,
+    );
+    const raw = dv.getBigUint64(64, true);
+    // stacSOL is 9 decimals (Sanctum stake-pool tokens).
+    out.set(atas[i]!.toBase58(), Number(raw) / 1e9);
+  });
+  return out;
+}
+
 /** Fetch all YAL tokens from mainnet and convert to UI shape — enriches each
  *  token with its Token-2022 metadata + the JSON description/image + live
- *  Meteora pool state (bonded sol, threshold, migration flag). */
+ *  Meteora pool state (bonded sol, threshold, migration flag) + the LIVE
+ *  treasury ATA stacSOL balance (so direct-Sanctum-CPI deposits show up
+ *  even though they don't increment the stored treasury_stacsol field). */
 export async function listTokens(conn: Connection): Promise<UiToken[]> {
   const onchain = await fetchAllYalTokens(conn);
   const dbc = new DynamicBondingCurveClient(conn, "confirmed");
-  // Parallel: metadata + pool view per token.
-  const enriched = await Promise.all(
-    onchain.map(async (t) => {
-      const [meta, pool] = await Promise.all([
-        fetchMintMeta(conn, t.memeMint),
-        fetchPoolView(dbc, t.memeMint),
-      ]);
-      return toUiToken(t, meta, pool);
-    }),
-  );
-  return enriched;
+  // Parallel: metadata + pool view per token + a single batched live-balance
+  // call for every treasury ATA.
+  const [enrichedRaw, liveBalances] = await Promise.all([
+    Promise.all(
+      onchain.map(async (t) => {
+        const [meta, pool] = await Promise.all([
+          fetchMintMeta(conn, t.memeMint),
+          fetchPoolView(dbc, t.memeMint),
+        ]);
+        return { t, meta, pool };
+      }),
+    ),
+    fetchLiveTreasuryBalances(
+      conn,
+      onchain.map((t) => t.treasuryTokenAccount),
+    ),
+  ]);
+  return enrichedRaw.map(({ t, meta, pool }) => {
+    const ui = toUiToken(t, meta, pool);
+    // Override stored treasury_stacsol with the live ATA balance when it's
+    // higher — the on-chain ATA is the source of truth; the stored field
+    // can lag if SOL was deposited via direct Sanctum CPI rather than
+    // through YAL's deposit_to_stacsol path.
+    const live = liveBalances.get(ui.treasury_ata) ?? 0;
+    ui.treasury_stacsol = Math.max(ui.treasury_stacsol, live);
+    return ui;
+  });
 }
 
 export function floorOf(t: UiToken, nav: number): number {

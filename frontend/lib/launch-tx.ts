@@ -51,6 +51,28 @@ export const LEGACY_CONFIGS = new Set<string>([
   "8KQMrM3A7e4RP4GjYkWZYu9K6ki27XtiUP9nsb4fpG2R",
 ]);
 
+/** Force-mark specific mints as legacy regardless of their resolved
+ *  pool_config. Use when a token's curve was deployed against a current
+ *  config but its surrounding setup (auth, treasury ATA, metadata) is
+ *  still on legacy footing and needs the warning. */
+export const FORCED_LEGACY_MINTS = new Set<string>([
+  "63739fE9XjoSXBUDWCnVGRzbaKSfMz6Pvqc2ShrtwKSm", // moon
+]);
+
+/** True if the token should display the LEGACY badge — covers known legacy
+ *  configs, backfilled tokens with no resolvable pool, anything outside the
+ *  current config set, AND the explicit force list above. */
+export function isLegacyToken(
+  poolConfig: string | undefined,
+  mint?: string,
+): boolean {
+  if (mint && FORCED_LEGACY_MINTS.has(mint)) return true;
+  if (!poolConfig) return true;
+  if (LEGACY_CONFIGS.has(poolConfig)) return true;
+  const currentSet = new Set(Object.values(YAL_DBC_CONFIGS).map((p) => p.toBase58()));
+  return !currentSet.has(poolConfig);
+}
+
 function configPubkey(tier: GraduationTier, envVar: string): PublicKey {
   return new PublicKey(process.env[envVar] || DEFAULT_CONFIGS[tier]);
 }

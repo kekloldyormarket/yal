@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { fmt } from "@/lib/format";
 import { floorOf } from "@/lib/yal-client";
-import { LEGACY_CONFIGS } from "@/lib/launch-tx";
+import { isLegacyToken } from "@/lib/launch-tx";
 import { Stat, TokenAvatar, SortBtn } from "@/components/Primitives";
 import { useYal } from "./providers";
 import type { UiToken } from "@/lib/types";
@@ -17,6 +17,33 @@ export default function HomePage() {
   const [tab, setTab] = useState<"all" | "bonding" | "graduated">("all");
   const [sort, setSort] = useState<SortKey>("recent");
   const [q, setQ] = useState("");
+
+  // Bump-detection: when a token's bonded_sol changes between refreshes,
+  // briefly shake + highlight that row. prevBondedRef holds last-seen values
+  // so we can diff cheaply on every render. recentlyBumped is a transient
+  // Set that's cleared 1.4s after the animation duration ends.
+  const prevBondedRef = useRef<Record<string, number>>({});
+  const [recentlyBumped, setRecentlyBumped] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const newlyBumped = new Set<string>();
+    for (const t of tokens) {
+      const prev = prevBondedRef.current[t.mint];
+      if (prev !== undefined && Math.abs(prev - t.bonded_sol) > 1e-9) {
+        newlyBumped.add(t.mint);
+      }
+      prevBondedRef.current[t.mint] = t.bonded_sol;
+    }
+    if (newlyBumped.size === 0) return;
+    setRecentlyBumped((prev) => new Set([...prev, ...newlyBumped]));
+    const handle = setTimeout(() => {
+      setRecentlyBumped((prev) => {
+        const next = new Set(prev);
+        for (const m of newlyBumped) next.delete(m);
+        return next;
+      });
+    }, 1400);
+    return () => clearTimeout(handle);
+  }, [tokens]);
 
   const filtered = useMemo(() => {
     let out = tokens.slice();
@@ -175,7 +202,13 @@ export default function HomePage() {
           </thead>
           <tbody>
             {filtered.map((t, i) => (
-              <TokenRow key={t.mint} t={t} idx={i + 1} nav={nav} />
+              <TokenRow
+                key={t.mint}
+                t={t}
+                idx={i + 1}
+                nav={nav}
+                bumped={recentlyBumped.has(t.mint)}
+              />
             ))}
             {filtered.length === 0 && !tokenLoading && (
               <tr>
@@ -225,15 +258,20 @@ function TokenRow({
   t,
   idx,
   nav,
+  bumped,
 }: {
   t: UiToken;
   idx: number;
   nav: number;
+  bumped: boolean;
 }) {
   const router = useRouter();
   const floor = floorOf(t, nav);
   return (
-    <tr className="row-link" onClick={() => router.push("/token/" + t.mint)}>
+    <tr
+      className={"row-link" + (bumped ? " row-bump" : "")}
+      onClick={() => router.push("/token/" + t.mint)}
+    >
       <td className="muted">{idx}</td>
       <td>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -252,10 +290,10 @@ function TokenRow({
         ) : (
           <span className="badge bond">bonding</span>
         )}
-        {t.pool_config && LEGACY_CONFIGS.has(t.pool_config) && (
+        {isLegacyToken(t.pool_config) && (
           <span
             className="badge"
-            title="Legacy config — only ~40% of LP is drainable into stacSOL. Tokens launched against newer configs drain 90%."
+            title="Legacy config (or no resolvable Meteora pool) — only ~40% of LP is drainable into stacSOL. Tokens launched against newer configs drain 90%."
             style={{
               marginLeft: 6,
               color: "var(--danger)",

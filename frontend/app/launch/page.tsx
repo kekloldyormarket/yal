@@ -103,6 +103,16 @@ export default function LaunchPage() {
       pushToast({ title: "connect a wallet first", kind: "danger" });
       return;
     }
+    // Guard: the user picked an image but the upload hasn't finished yet.
+    // Submitting now would bake `"image": ""` into the metadata. Bail loud.
+    if (uploading || (imgPreview && !form.img)) {
+      pushToast({
+        title: "image still uploading",
+        sub: "wait a sec then hit launch again",
+        kind: "danger",
+      });
+      return;
+    }
     setStep(2);
 
     // Pre-generate the base mint so we can bake `yal.fun/token/<mint>` into
@@ -442,8 +452,16 @@ function FormStep({
             cost: <strong className="accent">0.02 sol</strong> · creates Meteora
             DBC curve + register_token tx
           </div>
-          <button className="btn primary lg" onClick={next} disabled={!wallet}>
-            {wallet ? "launch →" : "connect wallet first"}
+          <button
+            className="btn primary lg"
+            onClick={next}
+            disabled={!wallet || uploading}
+          >
+            {!wallet
+              ? "connect wallet first"
+              : uploading
+                ? "uploading image…"
+                : "launch →"}
           </button>
         </div>
       </div>

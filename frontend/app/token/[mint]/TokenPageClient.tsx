@@ -11,7 +11,7 @@ import { fetchYalTokenByMint, registerTokenIx, yalTokenPda } from "@/lib/sdk";
 import { Keypair, Transaction } from "@solana/web3.js";
 import { getTokenMetadata } from "@solana/spl-token";
 import { TOKEN_2022_PROGRAM } from "@/lib/sdk";
-import { buildSwapTx } from "@/lib/swap-tx";
+import { buildSwapTx, getSwapQuote } from "@/lib/swap-tx";
 import { appendTip, sendViaSender } from "@/lib/sender";
 import { useDbcPoolState } from "@/lib/dbc-state";
 import { useCreatedAt } from "@/lib/created-at";
@@ -441,13 +441,60 @@ function BuySellPanel({
   // Sell percentage buttons need the user's meme balance. Buy percentage
   // buttons are literal SOL amounts (0.1, 0.5, 1, 5) — no balance needed.
   const memeBal = wallet?.holdings[token.mint] || 0;
-  // Local approximation for the UI — actual fill comes from Meteora's
-  // swapQuote at submit time.
-  const expected = valid
+
+  // Live curve-aware quote from Meteora. Spot price × amount underestimates
+  // the impact for any meaningful chunk of the pool — selling 100% of a bag
+  // walks down the curve and the user receives far less than spot × amount.
+  const [quoteOut, setQuoteOut] = useState<bigint | null>(null);
+  const [quoting, setQuoting] = useState(false);
+  useEffect(() => {
+    if (!valid) {
+      setQuoteOut(null);
+      return;
+    }
+    let cancelled = false;
+    setQuoting(true);
+    const handle = setTimeout(() => {
+      const swapBaseForQuote = tab === "sell";
+      const amountIn = swapBaseForQuote
+        ? BigInt(Math.floor(parsed * 1e6))
+        : BigInt(Math.floor(parsed * 1e9));
+      getSwapQuote({
+        conn: connection,
+        user: publicKey ?? new PublicKey("11111111111111111111111111111111"),
+        memeMint: new PublicKey(token.mint),
+        amountIn,
+        swapBaseForQuote,
+        slippageBps: slip * 100,
+      })
+        .then((q) => {
+          if (!cancelled) setQuoteOut(q.expectedOut);
+        })
+        .catch(() => {
+          if (!cancelled) setQuoteOut(null);
+        })
+        .finally(() => {
+          if (!cancelled) setQuoting(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [amt, tab, slip, parsed, valid, connection, publicKey, token.mint]);
+
+  // Convert raw quote output to display units. Buy: SOL lamports → SOL.
+  // Sell: meme raw → meme UI count. Fall back to spot-price approximation
+  // while the curve quote is in-flight, but only as a rough placeholder.
+  const expected = quoteOut !== null
     ? tab === "buy"
-      ? parsed / price
-      : parsed * price
-    : 0;
+      ? Number(quoteOut) / 1e6
+      : Number(quoteOut) / 1e9
+    : valid
+      ? tab === "buy"
+        ? parsed / price
+        : parsed * price
+      : 0;
 
   async function submit() {
     if (!valid || !publicKey || !signTransaction) return;
@@ -579,11 +626,13 @@ function BuySellPanel({
         <div className="kv">
           <span className="k">you receive ≈</span>
           <span className="v num accent">
-            {valid
-              ? tab === "buy"
-                ? fmt.num(expected, 0) + " " + token.ticker
-                : expected.toFixed(6) + " sol"
-              : "—"}
+            {!valid
+              ? "—"
+              : quoting && quoteOut === null
+                ? "quoting…"
+                : tab === "buy"
+                  ? fmt.num(expected, 0) + " " + token.ticker
+                  : expected.toFixed(6) + " sol"}
           </span>
         </div>
         <div className="kv">
