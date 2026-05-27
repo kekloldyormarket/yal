@@ -12,17 +12,21 @@ import type { UiToken } from "@/lib/types";
 
 type SortKey = "recent" | "bonded" | "floor" | "progress";
 
+const PAGE_SIZE = 20;
+
 export default function HomePage() {
   const { tokens, tokenLoading, stats, nav } = useYal();
   const [tab, setTab] = useState<"all" | "bonding" | "graduated">("all");
   const [sort, setSort] = useState<SortKey>("recent");
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(0);
 
   // Bump-detection: when a token's bonded_sol changes between refreshes,
-  // briefly shake + highlight that row. prevBondedRef holds last-seen values
-  // so we can diff cheaply on every render. recentlyBumped is a transient
-  // Set that's cleared 1.4s after the animation duration ends.
+  // record the activity ts (drives the "recent" sort — most-recently-traded
+  // floats to the top) AND mark the row for a 1.4s shake/highlight class.
+  // prevBondedRef holds last-seen bonded values for cheap diffing.
   const prevBondedRef = useRef<Record<string, number>>({});
+  const [lastActivityTs, setLastActivityTs] = useState<Record<string, number>>({});
   const [recentlyBumped, setRecentlyBumped] = useState<Set<string>>(new Set());
   useEffect(() => {
     const newlyBumped = new Set<string>();
@@ -34,6 +38,12 @@ export default function HomePage() {
       prevBondedRef.current[t.mint] = t.bonded_sol;
     }
     if (newlyBumped.size === 0) return;
+    const now = Date.now();
+    setLastActivityTs((prev) => {
+      const next = { ...prev };
+      for (const m of newlyBumped) next[m] = now;
+      return next;
+    });
     setRecentlyBumped((prev) => new Set([...prev, ...newlyBumped]));
     const handle = setTimeout(() => {
       setRecentlyBumped((prev) => {
@@ -58,15 +68,33 @@ export default function HomePage() {
           t.mint.toLowerCase().includes(qq),
       );
     }
+    // "recent" sort: live-traded floats to the top. lastActivityTs (set when
+    // bonded_sol changed this session) takes precedence; tokens with no live
+    // activity yet fall back to created_at so brand-new tokens still surface.
+    // Multiplier scales ms → seconds so it dominates the seconds-based
+    // created_at column.
+    const recentKey = (t: UiToken) =>
+      Math.max(t.created_at, (lastActivityTs[t.mint] ?? 0) / 1000);
     const sorters: Record<SortKey, (a: UiToken, b: UiToken) => number> = {
-      recent: (a, b) => b.created_at - a.created_at,
+      recent: (a, b) => recentKey(b) - recentKey(a),
       bonded: (a, b) => b.bonded_sol - a.bonded_sol,
       floor: (a, b) => floorOf(b, nav) - floorOf(a, nav),
       progress: (a, b) => b.progress - a.progress,
     };
     out.sort(sorters[sort]);
     return out;
-  }, [tokens, tab, sort, q, nav]);
+  }, [tokens, tab, sort, q, nav, lastActivityTs]);
+
+  // Reset to page 0 whenever the filter set changes (tab/search/sort change).
+  useEffect(() => {
+    setPage(0);
+  }, [tab, sort, q]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageItems = useMemo(
+    () => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
+    [filtered, page],
+  );
 
   return (
     <div className="container">
@@ -201,11 +229,11 @@ export default function HomePage() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((t, i) => (
+            {pageItems.map((t, i) => (
               <TokenRow
                 key={t.mint}
                 t={t}
-                idx={i + 1}
+                idx={page * PAGE_SIZE + i + 1}
                 nav={nav}
                 bumped={recentlyBumped.has(t.mint)}
               />
@@ -244,6 +272,41 @@ export default function HomePage() {
           </tbody>
         </table>
       </div>
+
+      {totalPages > 1 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginTop: 12,
+            fontSize: 11,
+            color: "var(--text-3)",
+          }}
+        >
+          <span>
+            page {page + 1} / {totalPages} · {filtered.length} total
+          </span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              className="btn"
+              style={{ height: 26, padding: "0 10px", fontSize: 10 }}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+            >
+              ← prev
+            </button>
+            <button
+              className="btn"
+              style={{ height: 26, padding: "0 10px", fontSize: 10 }}
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+            >
+              next →
+            </button>
+          </div>
+        </div>
+      )}
 
       <p className="muted" style={{ fontSize: 11, marginTop: 16 }}>
         click a row for detail. graduation target is the{" "}
