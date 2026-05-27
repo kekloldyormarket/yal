@@ -43,8 +43,12 @@ export async function POST(req: Request) {
 
     if (!name) return NextResponse.json({ error: "name required" }, { status: 400 });
     if (!symbol) return NextResponse.json({ error: "symbol required" }, { status: 400 });
-    if (!image || !/^https?:\/\//.test(image)) {
-      return NextResponse.json({ error: "image must be an http(s) url" }, { status: 400 });
+    // Image is optional. If provided, it must be a real URL.
+    if (image && !/^https?:\/\//.test(image)) {
+      return NextResponse.json(
+        { error: "image must be an http(s) url" },
+        { status: 400 },
+      );
     }
 
     const metadata: Metadata = {
@@ -55,11 +59,13 @@ export async function POST(req: Request) {
       external_url: sanitize(body.external_url, 512),
       twitter: sanitize(body.twitter, 64),
       telegram: sanitize(body.telegram, 128),
-      properties: {
+    };
+    if (image) {
+      metadata.properties = {
         files: [{ uri: image, type: "image/png" }],
         category: "image",
-      },
-    };
+      };
+    }
 
     const filename = `metadata/${symbol.toLowerCase()}-${Date.now()}.json`;
     const blob = await put(filename, JSON.stringify(metadata, null, 2), {
