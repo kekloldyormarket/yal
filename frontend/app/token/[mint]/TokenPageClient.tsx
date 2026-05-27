@@ -7,7 +7,8 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { fmt } from "@/lib/format";
 import { Stat } from "@/components/Primitives";
 import { floorOf, priceAt, GRADUATION_THRESHOLD_SOL, STACSOL, YAL_PROGRAM_ID_STR, toUiToken } from "@/lib/yal-client";
-import { fetchYalTokenByMint } from "@/lib/sdk";
+import { fetchYalTokenByMint, registerTokenIx, yalTokenPda } from "@/lib/sdk";
+import { Keypair, Transaction } from "@solana/web3.js";
 import { getTokenMetadata } from "@solana/spl-token";
 import { TOKEN_2022_PROGRAM } from "@/lib/sdk";
 import { buildSwapTx } from "@/lib/swap-tx";
@@ -104,8 +105,13 @@ export default function TokenPageClient({
   │ 404 mint │
   └──────────┘`}</pre>
           <p className="muted" style={{ marginTop: 12 }}>
-            that mint isn&apos;t registered with the YAL router.
+            this mint has no yal_token PDA yet. If you launched it on Meteora
+            but the YAL half failed, click below to register it now — only
+            costs the register_token tx fee + treasury rent.
           </p>
+          <div style={{ marginTop: 24 }}>
+            <RescueRegisterButton mint={mint} />
+          </div>
           <p style={{ marginTop: 16 }}>
             <Link href="/" className="accent">
               ← back to tokens
@@ -1047,6 +1053,90 @@ function makeBondHistory(bondedSol: number) {
 // yal_token.authority. Lets the launcher re-upload metadata (name / symbol /
 // description / image) and flips the on-chain Token-2022 'uri' field to
 // point at the new JSON.
+// Standalone register-only rescue button. For Meteora pools where the user
+// got charged for createPool but YAL register_token never landed. Anyone
+// with a connected wallet can sign the register tx — first one to land wins
+// the yal_token.authority slot.
+function RescueRegisterButton({ mint }: { mint: string }) {
+  const { connection, pushToast, refreshTokens } = useYal();
+  const { publicKey, signTransaction } = useWallet();
+  const [working, setWorking] = useState(false);
+
+  async function submit() {
+    if (!publicKey || !signTransaction) {
+      pushToast({ title: "connect a wallet first", kind: "danger" });
+      return;
+    }
+    setWorking(true);
+    try {
+      const memeMint = new PublicKey(mint);
+      const [yalToken] = yalTokenPda(memeMint);
+      const treasuryAta = Keypair.generate();
+
+      const ix = registerTokenIx({
+        yalToken,
+        memeMint,
+        treasuryAta: treasuryAta.publicKey,
+        authority: publicKey,
+        stacsolTokenProgram: TOKEN_2022_PROGRAM,
+        totalSupply: 1_000_000_000n * 1_000_000n,
+      });
+      const tx = new Transaction().add(ix);
+      const { blockhash } = await connection.getLatestBlockhash("finalized");
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = publicKey;
+      appendTip(tx, publicKey);
+      tx.partialSign(treasuryAta);
+      const signed = await signTransaction(tx);
+
+      // Simulate first to surface failures pre-fee.
+      const sim = await connection.simulateTransaction(signed);
+      if (sim.value.err) {
+        const logs = (sim.value.logs ?? []).slice(-4).join(" | ");
+        throw new Error(
+          `register_token sim failed: ${JSON.stringify(sim.value.err)} · ${logs}`,
+        );
+      }
+
+      const sig = await sendViaSender(signed.serialize());
+      const conf = await connection.confirmTransaction(sig, "confirmed");
+      if (conf.value.err) {
+        throw new Error(
+          `register_token on-chain err: ${JSON.stringify(conf.value.err)} (sig ${sig})`,
+        );
+      }
+      pushToast({
+        title: "registered with YAL",
+        sub: sig.slice(0, 8) + "…",
+      });
+      void refreshTokens();
+      // Hard-reload the token page so all panels remount with the new state.
+      setTimeout(() => window.location.reload(), 800);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "rescue failed";
+      console.error("rescue failed:", err);
+      pushToast({
+        title: "rescue failed",
+        sub: msg.slice(0, 280),
+        kind: "danger",
+      });
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return (
+    <button
+      className="btn primary lg"
+      onClick={submit}
+      disabled={working}
+      style={{ minWidth: 280 }}
+    >
+      {working ? "signing…" : "rescue · register this mint"}
+    </button>
+  );
+}
+
 function CreatorReconfigurePanel({ token }: { token: UiToken }) {
   const { connection, pushToast } = useYal();
   const { publicKey, signTransaction } = useWallet();
