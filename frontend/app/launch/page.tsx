@@ -6,6 +6,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useYal } from "../providers";
 import type { UiToken } from "@/lib/types";
 import { TIER_LABELS, type GraduationTier, buildLaunchTx } from "@/lib/launch-tx";
+import { appendTip, sendViaSender } from "@/lib/sender";
 
 type LaunchForm = {
   name: string;
@@ -22,7 +23,7 @@ const YAL_EXTERNAL_URL = "https://yal.fun";
 
 export default function LaunchPage() {
   const { wallet, pushToast, registerPendingLaunch, connection } = useYal();
-  const { publicKey, signTransaction } = useWallet();
+  const { publicKey, signAllTransactions } = useWallet();
   const router = useRouter();
   const [form, setForm] = useState<LaunchForm>({
     name: "",
@@ -92,7 +93,7 @@ export default function LaunchPage() {
   }
 
   async function sign() {
-    if (!publicKey || !signTransaction) {
+    if (!publicKey || !signAllTransactions) {
       pushToast({ title: "connect a wallet first", kind: "danger" });
       return;
     }
@@ -142,41 +143,41 @@ export default function LaunchPage() {
       return;
     }
 
-    // 3. Sign + send Meteora createPool (baseMint is a co-signer).
+    // 3. Append Jito tip to each tx + partialSign with co-signers, then sign
+    //    BOTH with a single wallet popup via signAllTransactions.
     try {
+      appendTip(built.meteoraTx, publicKey);
+      appendTip(built.registerTx, publicKey);
       built.meteoraTx.partialSign(built.baseMint);
-      const signed = await signTransaction(built.meteoraTx);
-      const sig = await connection.sendRawTransaction(signed.serialize(), {
-        skipPreflight: false,
-        maxRetries: 5,
-      });
-      await connection.confirmTransaction(sig, "confirmed");
-      pushToast({ title: "DBC pool created", sub: sig.slice(0, 8) + "…" });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "DBC tx failed";
-      pushToast({ title: "DBC pool failed", sub: msg, kind: "danger" });
-      setStep(1);
-      return;
-    }
-
-    // 4. Sign + send YAL register_token (treasuryAta is a co-signer).
-    try {
       built.registerTx.partialSign(built.treasuryAta);
-      const signed = await signTransaction(built.registerTx);
-      const sig = await connection.sendRawTransaction(signed.serialize(), {
-        skipPreflight: false,
-        maxRetries: 5,
-      });
-      await connection.confirmTransaction(sig, "confirmed");
-      pushToast({ title: "registered with YAL router", sub: sig.slice(0, 8) + "…" });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "register_token failed";
+
+      const [signedMeteora, signedRegister] = await signAllTransactions([
+        built.meteoraTx,
+        built.registerTx,
+      ]);
+
+      // 4. Submit both through Helius Sender (dual-routes to Jito + staked
+      //    connections). register_token doesn't actually depend on the mint
+      //    existing yet, so parallel submission is safe.
+      const [sigMeteora, sigRegister] = await Promise.all([
+        sendViaSender(signedMeteora.serialize()),
+        sendViaSender(signedRegister.serialize()),
+      ]);
+
+      // 5. Wait for both to confirm.
+      await Promise.all([
+        connection.confirmTransaction(sigMeteora, "confirmed"),
+        connection.confirmTransaction(sigRegister, "confirmed"),
+      ]);
+
       pushToast({
-        title: "register_token failed",
-        sub: msg + " (DBC pool exists — retry from token page)",
-        kind: "danger",
+        title: "launched on-chain",
+        sub: `pool ${sigMeteora.slice(0, 6)}… · register ${sigRegister.slice(0, 6)}…`,
       });
-      setStep(1);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "launch tx failed";
+      pushToast({ title: "launch failed", sub: msg, kind: "danger" });
+      setStep(0);
       return;
     }
 
