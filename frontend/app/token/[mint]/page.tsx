@@ -2,9 +2,13 @@
 
 import Link from "next/link";
 import { use, useMemo, useState } from "react";
+import { PublicKey } from "@solana/web3.js";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { fmt } from "@/lib/format";
 import { Stat } from "@/components/Primitives";
 import { floorOf, priceAt, GRADUATION_THRESHOLD_SOL, STACSOL, YAL_PROGRAM_ID_STR } from "@/lib/yal-client";
+import { buildSwapTx } from "@/lib/swap-tx";
+import { appendTip, sendViaSender } from "@/lib/sender";
 import { useYal } from "../../providers";
 import type { UiToken } from "@/lib/types";
 
@@ -14,7 +18,7 @@ export default function TokenPage({
   params: Promise<{ mint: string }>;
 }) {
   const { mint } = use(params);
-  const { tokens, tokenLoading, wallet, nav, pushToast, applyLocalRedeem, applyLocalBuy, applyLocalSell } = useYal();
+  const { tokens, tokenLoading, wallet, nav, pushToast, applyLocalRedeem } = useYal();
   const token = tokens.find((t) => t.mint === mint);
 
   if (!token) {
@@ -81,24 +85,7 @@ export default function TokenPage({
               }}
             />
           ) : (
-            <BuySellPanel
-              token={token}
-              wallet={wallet}
-              onBuy={(solAmount, expected) => {
-                applyLocalBuy(token.mint, solAmount, expected);
-                pushToast({
-                  title: "bought $" + token.ticker,
-                  sub: fmt.num(expected) + " for " + solAmount.toFixed(3) + " sol",
-                });
-              }}
-              onSell={(tickerAmt, expected) => {
-                applyLocalSell(token.mint, tickerAmt, expected);
-                pushToast({
-                  title: "sold $" + token.ticker,
-                  sub: expected.toFixed(4) + " sol",
-                });
-              }}
-            />
+            <BuySellPanel token={token} wallet={wallet} />
           )}
           <div style={{ height: 16 }} />
           <TokenMetaPanel token={token} />
@@ -311,14 +298,12 @@ function BondingChartPanel({ token }: { token: UiToken }) {
 function BuySellPanel({
   token,
   wallet,
-  onBuy,
-  onSell,
 }: {
   token: UiToken;
   wallet: { balance_sol: number } | null;
-  onBuy: (sol: number, expected: number) => void;
-  onSell: (memeAmt: number, expected: number) => void;
 }) {
+  const { connection, pushToast, refreshTokens } = useYal();
+  const { publicKey, signTransaction } = useWallet();
   const [tab, setTab] = useState<"buy" | "sell">("buy");
   const [amt, setAmt] = useState("");
   const [working, setWorking] = useState(false);
@@ -327,21 +312,51 @@ function BuySellPanel({
   const price = priceAt(token.progress);
   const parsed = parseFloat(amt);
   const valid = amt !== "" && !isNaN(parsed) && parsed > 0;
+  // Local approximation for the UI — actual fill comes from Meteora's
+  // swapQuote at submit time.
   const expected = valid
     ? tab === "buy"
       ? parsed / price
       : parsed * price
     : 0;
 
-  function submit() {
-    if (!valid) return;
+  async function submit() {
+    if (!valid || !publicKey || !signTransaction) return;
     setWorking(true);
-    setTimeout(() => {
-      if (tab === "buy") onBuy(parsed, expected);
-      else onSell(parsed, expected);
-      setWorking(false);
+    try {
+      const swapBaseForQuote = tab === "sell";
+      // Buy: parsed = SOL → lamports (1e9). Sell: parsed = meme UI units → raw (1e6).
+      const amountIn = swapBaseForQuote
+        ? BigInt(Math.floor(parsed * 1e6))
+        : BigInt(Math.floor(parsed * 1e9));
+
+      const { tx, expectedOut } = await buildSwapTx({
+        conn: connection,
+        user: publicKey,
+        memeMint: new PublicKey(token.mint),
+        amountIn,
+        swapBaseForQuote,
+        slippageBps: slip * 100,
+      });
+      appendTip(tx, publicKey);
+      const signed = await signTransaction(tx);
+      const sig = await sendViaSender(signed.serialize());
+      await connection.confirmTransaction(sig, "confirmed");
+      const outDisplay = swapBaseForQuote
+        ? (Number(expectedOut) / 1e9).toFixed(6) + " SOL"
+        : Math.floor(Number(expectedOut) / 1e6).toLocaleString() + " " + token.ticker;
+      pushToast({
+        title: (swapBaseForQuote ? "sold $" : "bought $") + token.ticker,
+        sub: outDisplay + " · " + sig.slice(0, 8) + "…",
+      });
       setAmt("");
-    }, 900);
+      void refreshTokens();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "swap failed";
+      pushToast({ title: "swap failed", sub: msg.slice(0, 200), kind: "danger" });
+    } finally {
+      setWorking(false);
+    }
   }
 
   return (
@@ -462,9 +477,9 @@ function BuySellPanel({
 
         <div className="hr-dashed" />
         <p className="muted" style={{ fontSize: 10, lineHeight: 1.5 }}>
-          mock execution. real version routes through Meteora DBC. on
-          graduation ({GRADUATION_THRESHOLD_SOL} sol bonded), bonded SOL transfers to the YAL router for
-          stacSOL conversion.
+          Routes through Meteora DBC. On graduation
+          ({GRADUATION_THRESHOLD_SOL} sol bonded for full tier), bonded SOL
+          gets minted into stacSOL and your bag becomes a pro-rata claim.
         </p>
       </div>
     </div>
