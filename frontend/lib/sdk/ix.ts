@@ -18,11 +18,14 @@ function disc(name: string): Uint8Array {
 }
 
 // Build the instruction data buffer = [8-byte discriminator, u64 arg LE].
+// Uses DataView for the u64 write — Next.js's polyfilled Buffer doesn't
+// expose writeBigUInt64LE in the client bundle. Buffer.from(uint8arr) just
+// wraps the same backing buffer so web3.js's `data: Buffer` type stays happy.
 function buildData(name: string, arg: bigint): Buffer {
-  const data = Buffer.alloc(16);
+  const data = new Uint8Array(16);
   data.set(disc(name), 0);
-  data.writeBigUInt64LE(arg, 8);
-  return data;
+  new DataView(data.buffer).setBigUint64(8, arg, true);
+  return Buffer.from(data);
 }
 
 export function registerTokenIx(args: {
