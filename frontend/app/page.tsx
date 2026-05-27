@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { fmt } from "@/lib/format";
 import { floorOf } from "@/lib/yal-client";
+import { LEGACY_CONFIGS } from "@/lib/launch-tx";
 import { Stat, TokenAvatar, SortBtn } from "@/components/Primitives";
 import { useYal } from "./providers";
 import type { UiToken } from "@/lib/types";
@@ -250,6 +251,19 @@ function TokenRow({
           <span className="badge grad">graduated</span>
         ) : (
           <span className="badge bond">bonding</span>
+        )}
+        {t.pool_config && LEGACY_CONFIGS.has(t.pool_config) && (
+          <span
+            className="badge"
+            title="Legacy config — only ~40% of LP is drainable into stacSOL. Tokens launched against newer configs drain 90%."
+            style={{
+              marginLeft: 6,
+              color: "var(--danger)",
+              borderColor: "var(--danger-dim)",
+            }}
+          >
+            legacy
+          </span>
         )}
       </td>
       <td className="r num">{t.bonded_sol.toFixed(2)} sol</td>

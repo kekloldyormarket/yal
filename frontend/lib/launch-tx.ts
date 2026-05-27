@@ -28,13 +28,28 @@ import { registerTokenIx, yalTokenPda, TOKEN_2022_PROGRAM } from "./sdk";
 export type GraduationTier = 5 | 20 | 80;
 
 // Mainnet-deployed DBC configs (one per tier). Env vars override for devnet
-// / staging. tokenUpdateAuthority = CreatorUpdateAuthority — launcher keeps
-// the ability to update metadata (name/symbol/uri) post-launch.
+// / staging. Current set: 90% partner-liquid LP (daemon drains everything) +
+// 10% creator-perm-locked (the day-1 ≥10% Meteora rule) + creator metadata
+// update authority.
 const DEFAULT_CONFIGS: Record<GraduationTier, string> = {
-  5: "2ACJ5JGshXts1a4vjMef1Zcqwa4xXnhfP5do8uCCaVW8",
-  20: "FYPDras2wmaCqKEGVEcFoSpiHKPSAHtJbhoEG32mDPrR",
-  80: "8KQMrM3A7e4RP4GjYkWZYu9K6ki27XtiUP9nsb4fpG2R",
+  5: "CPMnf75ao7x5gJKm17HFsKUGrex6Hp8tUdhCYHsUkWUN",
+  20: "7TQwMtg33dqFY6SXVAFt55GaSnRskPNU7jpVMg988ekN",
+  80: "5NP9RJUhQPAccHXeVSN4PW5fwV23Jphqwg82aqJdsZRY",
 };
+
+// Older config sets used a 10/40/50 split (partner perm / partner liquid /
+// creator liquid). Tokens launched against any of these were "legacy" —
+// only ~40% of LP is drainable by the daemon. UI shows a warning.
+export const LEGACY_CONFIGS = new Set<string>([
+  // First batch — immutable token authority
+  "DFiDinu6UmzdYUWJf38C5acXgWoBMjP9junzkFFcSCU9",
+  "A7SdTVNsiC5Dmw2KMxcDBKSU9fv5gjCUcsXeJBHNPbu1",
+  "BWrQzmtbw5nrE4ratP5fJtV7HPiP48vbjWT8t7HgPqto",
+  // Second batch — CreatorUpdateAuthority but still 50% creator-side LP
+  "2ACJ5JGshXts1a4vjMef1Zcqwa4xXnhfP5do8uCCaVW8",
+  "FYPDras2wmaCqKEGVEcFoSpiHKPSAHtJbhoEG32mDPrR",
+  "8KQMrM3A7e4RP4GjYkWZYu9K6ki27XtiUP9nsb4fpG2R",
+]);
 
 function configPubkey(tier: GraduationTier, envVar: string): PublicKey {
   return new PublicKey(process.env[envVar] || DEFAULT_CONFIGS[tier]);

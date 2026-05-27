@@ -27,6 +27,10 @@ export interface UiToken {
 
   status: "bonding" | "graduated";
   progress: number;                // 0..1 — bonded/80 for bonding tokens
+
+  /** Meteora DBC config pubkey this pool was launched against. Used to mark
+   *  legacy tokens that have less LP drainable into stacSOL. */
+  pool_config?: string;
 }
 
 export interface SystemStats {

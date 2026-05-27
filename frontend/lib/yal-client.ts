@@ -33,6 +33,7 @@ interface PoolView {
   bondedSol: number;
   thresholdSol: number;
   isMigrated: boolean;
+  configAddress?: string;
 }
 
 /** Convert on-chain YalToken bigint fields to plain numbers + derive status/progress. */
@@ -85,6 +86,7 @@ export function toUiToken(
     created_at: createdAt,
     status,
     progress,
+    pool_config: pool?.configAddress,
   };
 }
 
@@ -142,6 +144,7 @@ async function fetchPoolView(
       bondedSol: Number(poolState.account.quoteReserve.toString()) / 1e9,
       thresholdSol: Number(cfg.migrationQuoteThreshold.toString()) / 1e9,
       isMigrated: poolState.account.isMigrated === 1,
+      configAddress: poolState.account.config.toBase58(),
     };
   } catch {
     return undefined;
