@@ -19,10 +19,10 @@
   --text-3:  #5a5a5a;
   --text-4:  #3a3a3a;
 
-  --accent:        #d4ff00;
-  --accent-dim:    #8aa800;
-  --accent-faint:  #2a3300;
-  --accent-text:   #0a0a0a;
+  --accent:        #7c5cff;
+  --accent-dim:    #5d44cc;
+  --accent-faint:  #1a1342;
+  --accent-text:   #ffffff;
 
   --danger:    #ff3b3b;
   --danger-dim: #6b1818;
@@ -171,7 +171,7 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
   font-weight: 700;
   padding: 0 18px;
 }
-.nav-link.cta:hover { background: #e8ff42; color: var(--accent-text); }
+.nav-link.cta:hover { background: #9078ff; color: var(--accent-text); }
 
 /* nav ticker (under header) */
 .ticker {
@@ -289,7 +289,7 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
   border-color: var(--accent);
   font-weight: 700;
 }
-.btn.primary:hover { background: #e8ff42; border-color: #e8ff42; color: var(--accent-text); }
+.btn.primary:hover { background: #9078ff; border-color: #9078ff; color: var(--accent-text); }
 
 .btn.danger {
   background: transparent;

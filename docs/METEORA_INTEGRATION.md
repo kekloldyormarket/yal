@@ -9,19 +9,28 @@ routed into stacSOL through the YAL router.
 [memecoin launches on Meteora DBC]
        │
        ▼  bonded SOL accumulates as buyers ape
-[bond threshold hit: graduates]
+[bond threshold hit: graduates → Meteora DAMM v2 LP]
        │
-       ▼  Meteora calls custom migrator
-[YAL Router.graduate (= fund_treasury wrapper)]
+       ▼  LP position owned by YAL router PDA
+[yal_token treasury holds: raw SOL + DAMM LP + remaining meme reserves]
        │
-       ▼  treasury PDA holds SOL
-[Liquidator daemon, daily random jitter]
+       ▼  ONCE per UTC dayBucket, at sha256(dayBucket)%86400 seconds past midnight:
+[Liquidator sweeps EVERY graduated token in one batch]
+       │   · pulls post-bond LP   → SOL side swapped → fund_treasury
+       │   · pulls pre-bond meme reserves → sold on curve → fund_treasury
+       │   · drains accumulated treasury SOL via deposit_to_stacsol
+       ▼
+[stacSOL minted into YAL treasury for every token in the sweep]
        │
-       ▼  CPI to Sanctum SVP
-[stacSOL minted into YAL treasury]
-       │
-       ▼  available for memecoin holders to redeem
+       ▼  available for memecoin holders to redeem any time
 ```
+
+The single batch-trigger-per-day model is intentional: nobody can sandwich
+a specific token's drain because every graduated token drains together
+inside the same block window. The trigger is deterministic given UTC
+dayBucket — holders can verify the schedule by hashing forward — but the
+cadence is one single moment per day across the whole graduated set, not
+per-token jitter.
 
 ## Meteora DBC migration model
 

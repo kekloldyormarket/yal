@@ -1,0 +1,31 @@
+[Unit]
+Description=YAL daily liquidator — drains graduated token treasuries into stacSOL once per UTC dayBucket
+Documentation=https://github.com/kekloldyormarket/yal/tree/main/liquidator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sol
+WorkingDirectory=/home/sol/yal/liquidator
+# bun is the runtime — installed once via `curl -fsSL https://bun.sh/install | bash`
+# then symlinked into /usr/local/bin for the unit's PATH.
+ExecStart=/usr/local/bin/bun run src/index.ts
+Restart=on-failure
+RestartSec=15
+# Daemon is long-running (polls every 60s, fires once per UTC dayBucket on the
+# deterministic random offset). NOT a cron — cron can't react to the per-day
+# trigger window without re-arming every 24h.
+Environment=YAL_LIQUIDATOR_KEYPAIR=/home/sol/yal-liquidator.json
+Environment=RPC_URL=http://127.0.0.1:8899
+Environment=YAL_PROGRAM_ID=9zMMi7n47W9NK1aokyNZSaSqExz2n9nyASJNpE9eNDKL
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=yal-liquidator
+# Resource guards — daemon is tiny but isolate it from validator pressure.
+Nice=10
+IOSchedulingClass=idle
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

@@ -1,18 +1,16 @@
 // YAL Daily Liquidator
 //
-// Loops every 60s. For each registered YAL token, decides whether it's time to
-// liquidate based on:
-//   1. last_liquidation_ts + 24h <= now           (24h floor)
-//   2. random_seed(token, day_bucket) % 86400     (random offset within the day)
+// Loops every 60s. ONE random time-of-day per dayBucket sweeps EVERY graduated
+// token in a single pass — not per-token jitter. The daily trigger time is
+// `sha256(dayBucket) % 86400`: deterministic given the day, but unpredictable
+// before that day starts (anyone watching the chain knows when "today's sweep"
+// will fire ~ahead of time, but they can't sandwich a specific token because
+// every graduated token drains in the same batch window).
 //
-// Random offset prevents MEV/sandwich: nobody knows exactly when each token
-// liquidates. The offset is derivable but only by anyone who can read on-chain
-// state, so it's "uncertain enough" for a daemon-driven flow.
-//
-// Action per ready token:
-//   1. Push any SOL siting in the treasury PDA → deposit_to_stacsol
-//   2. (future) Sell pre-bond + post-bond memecoin reserves into the curve
-//      then deposit that SOL too.
+// Action per ready token in the daily sweep:
+//   1. Push any SOL sitting in the yal_token treasury PDA → deposit_to_stacsol
+//   2. (future, via DBC bridge) Withdraw LP position from Meteora DAMM v2,
+//      swap SOL side, then deposit that SOL too. Same single trigger window.
 
 import {
   Connection,
@@ -72,23 +70,23 @@ function nowSec(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-// Random offset per day_bucket per token. Deterministic given (token, day).
-function dailyOffset(memeMint: PublicKey, dayBucket: number): number {
+// Single daily trigger time-of-day, deterministic per dayBucket. Same value
+// for every token — when the wall clock crosses it, the whole graduated set
+// drains in one sweep.
+function dailyOffset(dayBucket: number): number {
   const h = crypto.createHash("sha256");
-  h.update(memeMint.toBuffer());
   h.update(Buffer.from(String(dayBucket)));
-  const digest = h.digest();
-  return digest.readUInt32BE(0) % 86400;
+  return h.digest().readUInt32BE(0) % 86400;
 }
 
-function shouldLiquidate(t: YalToken): boolean {
-  const now = nowSec();
-  const lastLiq = Number(t.lastLiquidationTs);
-  if (now - lastLiq < 86400) return false;          // 24h floor
+function todayTriggerTs(now: number): number {
   const dayBucket = Math.floor(now / 86400);
-  const offset = dailyOffset(t.memeMint, dayBucket);
-  const triggerAt = dayBucket * 86400 + offset;
-  if (now < triggerAt) return false;
+  return dayBucket * 86400 + dailyOffset(dayBucket);
+}
+
+function shouldLiquidate(t: YalToken, triggerTs: number, now: number): boolean {
+  if (now < triggerTs) return false;                                // not the moment yet
+  if (Number(t.lastLiquidationTs) >= triggerTs) return false;       // already swept this window
   if (t.treasurySolLamports < BigInt(MIN_LIQ_LAMPORTS)) return false;
   return true;
 }
@@ -171,11 +169,22 @@ async function liquidate(
 
 async function cycle(conn: Connection, payer: Keypair) {
   const tokens = await fetchAllTokens(conn);
+  const now = nowSec();
+  const triggerTs = todayTriggerTs(now);
   const ts = new Date().toISOString().slice(11, 19);
-  console.log(`[${ts}] ${tokens.length} YAL tokens registered`);
+  const triggerDate = new Date(triggerTs * 1000).toISOString().slice(11, 19);
+  console.log(
+    `[${ts}] ${tokens.length} YAL tokens registered · today's sweep trigger ${triggerDate} UTC` +
+      (now < triggerTs ? ` (in ${triggerTs - now}s)` : ` (passed)`),
+  );
 
-  for (const t of tokens) {
-    if (!shouldLiquidate(t)) continue;
+  if (now < triggerTs) return; // wait for the daily moment
+
+  const ready = tokens.filter((t) => shouldLiquidate(t, triggerTs, now));
+  if (ready.length === 0) return;
+
+  console.log(`[${ts}] daily sweep firing — ${ready.length} tokens to drain`);
+  for (const t of ready) {
     try {
       const sig = await liquidate(conn, payer, t);
       if (sig) {
