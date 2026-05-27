@@ -9,28 +9,38 @@ routed into stacSOL through the YAL router.
 [memecoin launches on Meteora DBC]
        │
        ▼  bonded SOL accumulates as buyers ape
-[bond threshold hit: graduates → Meteora DAMM v2 LP]
+[80 SOL threshold: DBC migrates → Meteora DAMM v2 LP]
        │
-       ▼  LP position owned by YAL router PDA
-[yal_token treasury holds: raw SOL + DAMM LP + remaining meme reserves]
+       ▼  LP owned by YAL-controlled creator/feeClaimer · AMM live for 0-24h
        │
-       ▼  ONCE per UTC dayBucket, at sha256(dayBucket)%86400 seconds past midnight:
-[Liquidator sweeps EVERY graduated token in one batch]
-       │   · pulls post-bond LP   → SOL side swapped → fund_treasury
-       │   · pulls pre-bond meme reserves → sold on curve → fund_treasury
-       │   · drains accumulated treasury SOL via deposit_to_stacsol
+       ▼  At sha256(dayBucket)%86400 seconds past UTC midnight:
+[Daily sweep — drains EVERY graduated token in one batch]
+       │   · withdraws entire DAMM v2 LP position (SOL + leftover meme)
+       │   · final swap of leftover meme into SOL on the dying AMM
+       │   · pushes total SOL → deposit_to_stacsol on YAL router
        ▼
-[stacSOL minted into YAL treasury for every token in the sweep]
+[yal_token.treasury_stacsol set · circulating_supply locked · AMM dead]
        │
-       ▼  available for memecoin holders to redeem any time
+       ▼  Holders call redeem any time → burn meme for pro-rata stacSOL
 ```
 
-The single batch-trigger-per-day model is intentional: nobody can sandwich
-a specific token's drain because every graduated token drains together
-inside the same block window. The trigger is deterministic given UTC
-dayBucket — holders can verify the schedule by hashing forward — but the
-cadence is one single moment per day across the whole graduated set, not
-per-token jitter.
+Design intent:
+
+- **The meme is meant to die.** After the daily sweep, the AMM has no SOL
+  left to trade against. The only exit is `redeem` (burn for stacSOL
+  claim). "Any given meme is dead; long live stacSOL."
+- **Up to 24h of post-graduation AMM speculation.** Token graduates at some
+  point during day N. The sweep fires once per day at a deterministic but
+  unknown-in-advance moment — could be 30 seconds after graduation, could
+  be 23 hours. This window is where MEV-resistant speculation lives.
+- **Snapshot is whoever holds when the music stops.** At sweep time,
+  `circulating_supply` gets locked. Subsequent transfers move claims
+  around but can't dilute. Redeem burns meme → mints stacSOL to caller,
+  pro-rata against locked supply.
+- **One global trigger, all tokens drain together.** Nobody can sandwich a
+  specific token because they all drain in the same block window.
+  Trigger time is deterministic given UTC dayBucket so holders can verify
+  ahead (and ape the final seconds if they want).
 
 ## Meteora DBC migration model
 

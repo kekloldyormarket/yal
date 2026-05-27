@@ -44,20 +44,21 @@ export default function HomePage() {
     <div className="container">
       <div className="hero">
         <h1>
-          launch a meme.
+          Yet Another Launchpad.
           <br />
-          feed the <span className="accent">stacSOL flywheel.</span>
+          any given meme is dead;
+          <br />
+          long live <span className="accent">stacSOL.</span>
         </h1>
         <p className="sub">
-          every meme that graduates on YAL routes its bonded SOL into{" "}
-          <strong>stacSOL</strong> — a single-validator LST we run on patched
-          agave with native vote batching, <strong>100% commission, every
-          lamport of yield compounds into NAV forever.</strong> Your launch is
-          an inflation tap into the LST: more memes bond → more SOL staked →
-          NAV doubles faster → every $YOURMEME&apos;s redemption floor ratchets
-          up on its own. Holders burn their meme to claim a pro-rata slice of
-          stacSOL backing. Supply only shrinks. Treasury only grows. The
-          marketing is the math.
+          Same DBC curve as pump.fun. At 80 SOL bonded, your meme graduates
+          and a 24-hour countdown starts. Within that window, at one random
+          moment, the entire bonded SOL flips into <strong>stacSOL</strong> —
+          our 100%-commission single-validator LST on patched agave. The AMM
+          dies. The meme dies. <strong>Everyone who held when the music
+          stopped walks away with a pro-rata stacSOL claim</strong>, burnable
+          forever. NAV compounds on autopilot from validator yield → your
+          slice only ratchets up. The marketing is the math.
         </p>
       </div>
 
